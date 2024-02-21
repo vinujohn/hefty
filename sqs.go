@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -54,6 +55,7 @@ func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string)
 }
 
 func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
+	// TODO: consider no message body but message attributes that are oversized
 	if msgSize(params) > MaxSqsMessageLengthBytes {
 		// create reference message
 		refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket)
@@ -83,7 +85,6 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 		}
 		//TODO: get correct library version
 		params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
-		fmt.Println("large")
 	}
 
 	//TODO: handle error by deleting s3 message
@@ -95,8 +96,38 @@ func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.
 }
 
 func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	out, err := client.ReceiveMessage(ctx, params, optFns...)
+	if err != nil {
+		return nil, err
+	}
+	for _, msg := range out.Messages {
+		if _, ok := msg.MessageAttributes[versionMessageKey]; ok {
+			// deserialize message body
+			var refMsg *referenceMsg
+			err = json.Unmarshal([]byte(*msg.Body), refMsg)
+			if err != nil {
+				return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
+			}
 
-	return client.ReceiveMessage(ctx, params, optFns...)
+			// make call to s3 to get message
+			s3Obj, err := client.s3Client.GetObject(ctx, &s3.GetObjectInput{
+				Bucket: &refMsg.S3Bucket,
+				Key:    &refMsg.S3Key,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("unable to get message from s3. %v", err)
+			}
+
+			// replace message body with s3 message
+			b, err := io.ReadAll(s3Obj.Body)
+			if err != nil {
+				return nil, fmt.Errorf("unable to read message from s3. %v", err)
+			}
+			msg.Body = aws.String(string(b))
+		}
+	}
+
+	return out, nil
 }
 
 // https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
@@ -136,6 +167,5 @@ func msgSize(params *sqs.SendMessageInput) int {
 			}
 		}
 	}
-	fmt.Println(size)
 	return size
 }
