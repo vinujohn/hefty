@@ -1,6 +1,7 @@
 package hefty
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -64,29 +65,36 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 		}
 
 		// upload large message to s3
+		sqsMsg := &sqsLargeMsg{
+			Body:              params.MessageBody,
+			MessageAttributes: params.MessageAttributes,
+		}
+		jsonSqsMsg, err := json.Marshal(sqsMsg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
+		}
 		_, err = client.s3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: aws.String(client.bucket),
 			Key:    aws.String(refMsg.S3Key),
-			Body:   strings.NewReader(*params.MessageBody),
+			Body:   bytes.NewReader(jsonSqsMsg),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("unable to upload large message to s3. %v", err)
 		}
 
 		// replace incoming message body with reference message
-		jsonBytes, err := json.MarshalIndent(refMsg, "", "\t")
+		jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
 		if err != nil {
 			return nil, fmt.Errorf("unable to marshal json message. %v", err)
 		}
-		params.MessageBody = aws.String(string(jsonBytes))
+		params.MessageBody = aws.String(string(jsonRefMsg))
 
-		if params.MessageAttributes == nil {
-			params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-		}
 		//TODO: get correct library version
+		// overwrite message attributes (if any) with hefty message attributes
+		params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
 		params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 	}
-
+	//TODO: handle MD5 attributes
 	//TODO: handle error by deleting s3 message
 	return client.SendMessage(ctx, params, optFns...)
 }
@@ -96,15 +104,25 @@ func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.
 }
 
 func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
-	out, err := client.ReceiveMessage(ctx, params, optFns...)
-	if err != nil {
-		return nil, err
+	// request hefty message attribute
+	if params.MessageAttributeNames == nil {
+		params.MessageAttributeNames = []string{versionMessageKey}
+	} else {
+		// TODO: what happens when user has 10 message attributes listed,
+		params.MessageAttributeNames = append(params.MessageAttributeNames, versionMessageKey)
 	}
-	for _, msg := range out.Messages {
-		if _, ok := msg.MessageAttributes[versionMessageKey]; ok {
+
+	out, err := client.ReceiveMessage(ctx, params, optFns...)
+	if err != nil || len(out.Messages) == 0 {
+		return out, err
+	}
+
+	for i := range out.Messages {
+		if _, ok := out.Messages[i].MessageAttributes[versionMessageKey]; ok {
+
 			// deserialize message body
-			var refMsg *referenceMsg
-			err = json.Unmarshal([]byte(*msg.Body), refMsg)
+			var refMsg referenceMsg
+			err = json.Unmarshal([]byte(*out.Messages[i].Body), &refMsg)
 			if err != nil {
 				return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
 			}
@@ -121,12 +139,19 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 			// replace message body with s3 message
 			b, err := io.ReadAll(s3Obj.Body)
 			if err != nil {
-				return nil, fmt.Errorf("unable to read message from s3. %v", err)
+				return nil, fmt.Errorf("unable to read message body from s3. %v", err)
 			}
-			msg.Body = aws.String(string(b))
+			var sqsMsg sqsLargeMsg
+			err = json.Unmarshal(b, &sqsMsg)
+			if err != nil {
+				return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
+			}
+			out.Messages[i].Body = sqsMsg.Body
+			out.Messages[i].MessageAttributes = sqsMsg.MessageAttributes
 		}
 	}
 
+	// TODO: handle MD5 attributes
 	return out, nil
 }
 
