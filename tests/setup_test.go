@@ -81,14 +81,16 @@ func TestMain(m *testing.M) {
 		}
 
 		// delete objects
-		_, err = testS3Client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
-			Bucket: &testBucket,
-			Delete: &s3Types.Delete{
-				Objects: itemsToDelete,
-			},
-		})
-		if err != nil {
-			log.Fatalf("could not delete objects in test bucket %s. %v", testBucket, err)
+		if len(itemsToDelete) > 0 {
+			_, err = testS3Client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+				Bucket: &testBucket,
+				Delete: &s3Types.Delete{
+					Objects: itemsToDelete,
+				},
+			})
+			if err != nil {
+				log.Fatalf("could not delete objects in test bucket %s. %v", testBucket, err)
+			}
 		}
 
 		if !*listObjects.IsTruncated {
