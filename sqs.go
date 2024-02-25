@@ -117,11 +117,13 @@ func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.
 
 func (client *SqsClient) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
 	if params.ReceiptHandle != nil {
-		// decode modified receipt handle to get sqs receipt handle, s3 bucket, and s3 key
+		// decode receipt handle
 		decoded, err := base64.StdEncoding.DecodeString(*params.ReceiptHandle)
 		if err != nil {
 			return nil, fmt.Errorf("could not decode receipt handle. %v", err)
 		}
+
+		// check if decoded receipt handle is for a large message
 		tokens := strings.Split(string(decoded), ":")
 		if len(tokens) == 3 {
 			receiptHandle, s3Bucket, s3Key := tokens[0], tokens[1], tokens[2]
@@ -132,7 +134,7 @@ func (client *SqsClient) DeleteHeftyMessage(ctx context.Context, params *sqs.Del
 				Key:    &s3Key,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("could not decode receipt handle. %v", err)
+				return nil, fmt.Errorf("could not delete s3 object for large message. %v", err)
 			}
 
 			// replace receipt handle
