@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -114,9 +115,31 @@ func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.
 	return client.SendMessageBatch(ctx, params, optFns...)
 }
 
-// TODO: figure out how to get the bucket and key for a particular message to delete.
 func (client *SqsClient) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
-	client.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{})
+	if params.ReceiptHandle != nil {
+		// decode modified receipt handle to get sqs receipt handle, s3 bucket, and s3 key
+		decoded, err := base64.StdEncoding.DecodeString(*params.ReceiptHandle)
+		if err != nil {
+			return nil, fmt.Errorf("could not decode receipt handle. %v", err)
+		}
+		tokens := strings.Split(string(decoded), ":")
+		if len(tokens) == 3 {
+			receiptHandle, s3Bucket, s3Key := tokens[0], tokens[1], tokens[2]
+
+			// delete large message from s3
+			_, err = client.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: &s3Bucket,
+				Key:    &s3Key,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("could not decode receipt handle. %v", err)
+			}
+
+			// replace receipt handle
+			params.ReceiptHandle = &receiptHandle
+		}
+	}
+
 	return client.DeleteMessage(ctx, params, optFns...)
 }
 
@@ -158,8 +181,8 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 			if err != nil {
 				return nil, fmt.Errorf("unable to read message body from s3. %v", err)
 			}
-			md5Hash := md5.New().Sum(b)
-			if string(md5Hash) != refMsg.S3Md5Hash {
+			md5Hash := md5.Sum(b)
+			if hex.EncodeToString(md5Hash[:]) != refMsg.S3Md5Hash {
 				return nil, errors.New("md5 hash for s3 object does not match md5 hash associated with reference message")
 			}
 
@@ -171,6 +194,11 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 			}
 			out.Messages[i].Body = s3LargeMsg.Body
 			out.Messages[i].MessageAttributes = s3LargeMsg.MessageAttributes
+
+			// modify receipt handle to contain s3 bucket and key info
+			newReceiptHandle := fmt.Sprintf("%s:%s:%s", *out.Messages[i].ReceiptHandle, refMsg.S3Bucket, refMsg.S3Key)
+			newReceiptHandle = base64.StdEncoding.EncodeToString([]byte(newReceiptHandle))
+			out.Messages[i].ReceiptHandle = &newReceiptHandle
 		}
 	}
 
