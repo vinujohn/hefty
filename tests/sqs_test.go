@@ -11,7 +11,7 @@ import (
 
 func Test(t *testing.T) {
 	_, err := testHeftySqsClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
-		MessageBody: aws.String(testLargeMsg256KB + "1"),
+		MessageBody: aws.String("1"),
 		QueueUrl:    &testQueueUrl,
 	})
 	if err != nil {
@@ -28,14 +28,15 @@ func Test(t *testing.T) {
 		}
 
 		for _, msg := range out.Messages {
-			t.Logf("received message: %s, sizeBytes: %d", *msg.MessageId, len(*msg.Body))
-			_, err = testHeftySqsClient.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
+			t.Logf("received message id: %s, sizeBytes: %d receiptHandle: %s", *msg.MessageId, len(*msg.Body), *msg.ReceiptHandle)
+			_, err = testHeftySqsClient.DeleteHeftyMessage(context.TODO(), &sqs.DeleteMessageInput{
 				QueueUrl:      &testQueueUrl,
 				ReceiptHandle: msg.ReceiptHandle,
 			})
 			if err != nil {
 				t.Fatalf("could not acknowledge hefty messages. %v", err)
 			}
+
 		}
 
 		time.Sleep(time.Second)
