@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 	testS3Client = s3.NewFromConfig(sdkConfig)
 
 	// create test bucket
-	testBucket = uuid.NewString()
+	testBucket = "hefty-integration-tests"
 	_, err = testS3Client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 		Bucket: &testBucket,
 		CreateBucketConfiguration: &s3Types.CreateBucketConfiguration{

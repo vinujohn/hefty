@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -17,5 +18,27 @@ func Test(t *testing.T) {
 		t.Fatalf("could not send hefty message. %v", err)
 	}
 
-	t.Fail()
+	i := 0
+	for i < 3 {
+		out, err := testHeftySqsClient.ReceiveHeftyMessage(context.TODO(), &sqs.ReceiveMessageInput{
+			QueueUrl: &testQueueUrl,
+		})
+		if err != nil {
+			t.Fatalf("could not receive hefty messages. %v", err)
+		}
+
+		for _, msg := range out.Messages {
+			t.Logf("received message: %s, sizeBytes: %d", *msg.MessageId, len(*msg.Body))
+			_, err = testHeftySqsClient.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
+				QueueUrl:      &testQueueUrl,
+				ReceiptHandle: msg.ReceiptHandle,
+			})
+			if err != nil {
+				t.Fatalf("could not acknowledge hefty messages. %v", err)
+			}
+		}
+
+		time.Sleep(time.Second)
+		i++
+	}
 }

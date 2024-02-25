@@ -3,6 +3,8 @@ package hefty
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,11 @@ type SqsClient struct {
 	sqs.Client
 	bucket   string
 	s3Client *s3.Client
+}
+
+type largeMsg struct {
+	Body              *string                                   `json:"body"`
+	MessageAttributes map[string]sqsTypes.MessageAttributeValue `json:"message_attributes"`
 }
 
 func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClient, error) {
@@ -58,25 +65,28 @@ func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string)
 func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
 	// TODO: consider no message body but message attributes that are oversized
 	if msgSize(params) > MaxSqsMessageLengthBytes {
+		// create large message
+		s3LargeMsg := &largeMsg{
+			Body:              params.MessageBody,
+			MessageAttributes: params.MessageAttributes,
+		}
+		jsonLargeMsg, err := json.Marshal(s3LargeMsg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
+		}
+
 		// create reference message
-		refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket)
+		md5Hash := md5.Sum(jsonLargeMsg)
+		refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, hex.EncodeToString(md5Hash[:]))
 		if err != nil {
 			return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 		}
 
 		// upload large message to s3
-		sqsMsg := &sqsLargeMsg{
-			Body:              params.MessageBody,
-			MessageAttributes: params.MessageAttributes,
-		}
-		jsonSqsMsg, err := json.Marshal(sqsMsg)
-		if err != nil {
-			return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
-		}
 		_, err = client.s3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: aws.String(client.bucket),
 			Key:    aws.String(refMsg.S3Key),
-			Body:   bytes.NewReader(jsonSqsMsg),
+			Body:   bytes.NewReader(jsonLargeMsg),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("unable to upload large message to s3. %v", err)
@@ -93,6 +103,7 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 		// overwrite message attributes (if any) with hefty message attributes
 		params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
 		params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+
 	}
 	//TODO: handle MD5 attributes
 	//TODO: handle error by deleting s3 message
@@ -101,6 +112,12 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 
 func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.SendMessageBatchInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageBatchOutput, error) {
 	return client.SendMessageBatch(ctx, params, optFns...)
+}
+
+// TODO: figure out how to get the bucket and key for a particular message to delete.
+func (client *SqsClient) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
+	client.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{})
+	return client.DeleteMessage(ctx, params, optFns...)
 }
 
 func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
@@ -136,18 +153,24 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 				return nil, fmt.Errorf("unable to get message from s3. %v", err)
 			}
 
-			// replace message body with s3 message
+			// read large message and verify md5
 			b, err := io.ReadAll(s3Obj.Body)
 			if err != nil {
 				return nil, fmt.Errorf("unable to read message body from s3. %v", err)
 			}
-			var sqsMsg sqsLargeMsg
-			err = json.Unmarshal(b, &sqsMsg)
+			md5Hash := md5.New().Sum(b)
+			if string(md5Hash) != refMsg.S3Md5Hash {
+				return nil, errors.New("md5 hash for s3 object does not match md5 hash associated with reference message")
+			}
+
+			// replace message body with s3 message
+			var s3LargeMsg largeMsg
+			err = json.Unmarshal(b, &s3LargeMsg)
 			if err != nil {
 				return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
 			}
-			out.Messages[i].Body = sqsMsg.Body
-			out.Messages[i].MessageAttributes = sqsMsg.MessageAttributes
+			out.Messages[i].Body = s3LargeMsg.Body
+			out.Messages[i].MessageAttributes = s3LargeMsg.MessageAttributes
 		}
 	}
 
@@ -156,7 +179,7 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 }
 
 // https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
-func newSqsReferenceMessage(queueUrl *string, bucketName string) (*referenceMsg, error) {
+func newSqsReferenceMessage(queueUrl *string, bucketName string, md5Hash string) (*referenceMsg, error) {
 	if queueUrl != nil {
 		tokens := strings.Split(*queueUrl, "/")
 		if len(tokens) != 5 {
@@ -164,9 +187,10 @@ func newSqsReferenceMessage(queueUrl *string, bucketName string) (*referenceMsg,
 		} else {
 			regionTokens := strings.Split(tokens[2], ".")
 			return &referenceMsg{
-				S3Region: regionTokens[1],
-				S3Bucket: bucketName,
-				S3Key:    fmt.Sprintf("%s/%s/%s/%s", tokens[3], regionTokens[1], tokens[4], uuid.New().String()),
+				S3Region:  regionTokens[1],
+				S3Bucket:  bucketName,
+				S3Key:     fmt.Sprintf("%s/%s/%s/%s", tokens[3], regionTokens[1], tokens[4], uuid.New().String()),
+				S3Md5Hash: md5Hash,
 			}, nil
 		}
 	}
