@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,7 +24,6 @@ import (
 
 const (
 	MaxSqsMessageLengthBytes = 262_144
-	ClientReservedBytes      = 30
 	versionMessageKey        = "hefty-client-version"
 )
 
@@ -71,14 +72,16 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 			Body:              params.MessageBody,
 			MessageAttributes: params.MessageAttributes,
 		}
+
+		// serialize large message
 		jsonLargeMsg, err := json.Marshal(s3LargeMsg)
 		if err != nil {
 			return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
 		}
 
 		// create reference message
-		md5Hash := md5.Sum(jsonLargeMsg)
-		refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, hex.EncodeToString(md5Hash[:]))
+		bodyHash, attributesHash := md5Hash(s3LargeMsg)
+		refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, bodyHash, attributesHash)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 		}
@@ -105,10 +108,21 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 		params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
 		params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 
+		out, err := client.SendMessage(ctx, params, optFns...)
+		if err != nil {
+			return out, err
+		}
+
+		// overwrite md5 values
+		out.MD5OfMessageBody = aws.String(bodyHash)
+		out.MD5OfMessageAttributes = aws.String(attributesHash)
+
+		return out, err
+	} else {
+		//TODO: handle MD5 attributes
+		//TODO: handle error by deleting s3 message
+		return client.SendMessage(ctx, params, optFns...)
 	}
-	//TODO: handle MD5 attributes
-	//TODO: handle error by deleting s3 message
-	return client.SendMessage(ctx, params, optFns...)
 }
 
 func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.SendMessageBatchInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageBatchOutput, error) {
@@ -178,24 +192,24 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 				return nil, fmt.Errorf("unable to get message from s3. %v", err)
 			}
 
-			// read large message and verify md5
-			b, err := io.ReadAll(s3Obj.Body)
+			// read large message
+			body, err := io.ReadAll(s3Obj.Body)
 			if err != nil {
 				return nil, fmt.Errorf("unable to read message body from s3. %v", err)
 			}
-			md5Hash := md5.Sum(b)
-			if hex.EncodeToString(md5Hash[:]) != refMsg.S3Md5Hash {
-				return nil, errors.New("md5 hash for s3 object does not match md5 hash associated with reference message")
-			}
 
-			// replace message body with s3 message
+			// replace message body and attributes with s3 message
 			var s3LargeMsg largeMsg
-			err = json.Unmarshal(b, &s3LargeMsg)
+			err = json.Unmarshal(body, &s3LargeMsg)
 			if err != nil {
 				return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
 			}
 			out.Messages[i].Body = s3LargeMsg.Body
 			out.Messages[i].MessageAttributes = s3LargeMsg.MessageAttributes
+
+			// replace md5 hashes
+			out.Messages[i].MD5OfBody = &refMsg.SqsMd5HashBody
+			out.Messages[i].MD5OfMessageAttributes = &refMsg.SqsMd5HashMsgAttr
 
 			// modify receipt handle to contain s3 bucket and key info
 			newReceiptHandle := fmt.Sprintf("%s:%s:%s", *out.Messages[i].ReceiptHandle, refMsg.S3Bucket, refMsg.S3Key)
@@ -209,7 +223,7 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 }
 
 // https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
-func newSqsReferenceMessage(queueUrl *string, bucketName string, md5Hash string) (*referenceMsg, error) {
+func newSqsReferenceMessage(queueUrl *string, bucketName, bodyHash, attributesHash string) (*referenceMsg, error) {
 	if queueUrl != nil {
 		tokens := strings.Split(*queueUrl, "/")
 		if len(tokens) != 5 {
@@ -217,10 +231,11 @@ func newSqsReferenceMessage(queueUrl *string, bucketName string, md5Hash string)
 		} else {
 			regionTokens := strings.Split(tokens[2], ".")
 			return &referenceMsg{
-				S3Region:  regionTokens[1],
-				S3Bucket:  bucketName,
-				S3Key:     fmt.Sprintf("%s/%s/%s/%s", tokens[3], regionTokens[1], tokens[4], uuid.New().String()),
-				S3Md5Hash: md5Hash,
+				S3Region:          regionTokens[1],
+				S3Bucket:          bucketName,
+				S3Key:             fmt.Sprintf("%s/%s/%s/%s", tokens[3], regionTokens[1], tokens[4], uuid.New().String()),
+				SqsMd5HashBody:    bodyHash,
+				SqsMd5HashMsgAttr: attributesHash,
 			}, nil
 		}
 	}
@@ -247,4 +262,57 @@ func msgSize(params *sqs.SendMessageInput) int {
 		}
 	}
 	return size
+}
+
+// md5Hash gets the md5 hash for both the body and message attributes of a large message
+func md5Hash(msg *largeMsg) (bodyHash string, attributesHash string) {
+	type keyValue struct {
+		key   string
+		value sqsTypes.MessageAttributeValue
+	}
+
+	if msg.Body != nil {
+		hash := md5.Sum([]byte(*msg.Body))
+		bodyHash = hex.EncodeToString(hash[:])
+	}
+
+	if msg.MessageAttributes != nil {
+
+		// sort slice of map keys and values
+		msgAttributes := []keyValue{}
+		for k, v := range msg.MessageAttributes {
+			msgAttributes = append(msgAttributes, keyValue{
+				key:   k,
+				value: v,
+			})
+		}
+		sort.Slice(msgAttributes, func(i, j int) bool {
+			return msgAttributes[i].key < msgAttributes[j].key
+		})
+
+		buf := new(bytes.Buffer)
+		for _, attr := range msgAttributes {
+			binary.Write(buf, binary.BigEndian, int32(len(attr.key)))
+			buf.Write([]byte(attr.key))
+			if attr.value.DataType != nil {
+				binary.Write(buf, binary.BigEndian, int32(len(*attr.value.DataType)))
+				buf.Write([]byte(*attr.value.DataType))
+
+				if attr.value.StringValue != nil {
+					buf.Write([]byte{1})
+					binary.Write(buf, binary.BigEndian, int32(len(*attr.value.StringValue)))
+					buf.Write([]byte(*attr.value.StringValue))
+				} else if len(attr.value.BinaryValue) > 0 {
+					buf.Write([]byte{2})
+					binary.Write(buf, binary.BigEndian, int32(len(attr.value.BinaryValue)))
+					buf.Write(attr.value.BinaryValue)
+				}
+			}
+		}
+
+		hash := md5.Sum(buf.Bytes())
+		attributesHash = hex.EncodeToString(hash[:])
+	}
+
+	return
 }
