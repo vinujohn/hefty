@@ -66,6 +66,7 @@ func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string)
 	}, nil
 }
 
+// TODO: make a size restriction of 2GB
 func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
 	if params == nil ||
 		params.MessageBody == nil ||
