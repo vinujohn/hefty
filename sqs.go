@@ -176,50 +176,50 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 
 	for i := range out.Messages {
 		if _, ok := out.Messages[i].MessageAttributes[versionMessageKey]; ok {
-
-			// deserialize message body
-			var refMsg referenceMsg
-			err = json.Unmarshal([]byte(*out.Messages[i].Body), &refMsg)
-			if err != nil {
-				return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
-			}
-
-			// make call to s3 to get message
-			s3Obj, err := client.s3Client.GetObject(ctx, &s3.GetObjectInput{
-				Bucket: &refMsg.S3Bucket,
-				Key:    &refMsg.S3Key,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("unable to get message from s3. %v", err)
-			}
-
-			// read large message
-			body, err := io.ReadAll(s3Obj.Body)
-			if err != nil {
-				return nil, fmt.Errorf("unable to read message body from s3. %v", err)
-			}
-
-			// replace message body and attributes with s3 message
-			var s3LargeMsg largeMsg
-			err = json.Unmarshal(body, &s3LargeMsg)
-			if err != nil {
-				return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
-			}
-			out.Messages[i].Body = s3LargeMsg.Body
-			out.Messages[i].MessageAttributes = s3LargeMsg.MessageAttributes
-
-			// replace md5 hashes
-			out.Messages[i].MD5OfBody = &refMsg.SqsMd5HashBody
-			out.Messages[i].MD5OfMessageAttributes = &refMsg.SqsMd5HashMsgAttr
-
-			// modify receipt handle to contain s3 bucket and key info
-			newReceiptHandle := fmt.Sprintf("%s:%s:%s", *out.Messages[i].ReceiptHandle, refMsg.S3Bucket, refMsg.S3Key)
-			newReceiptHandle = base64.StdEncoding.EncodeToString([]byte(newReceiptHandle))
-			out.Messages[i].ReceiptHandle = &newReceiptHandle
+			continue
 		}
+
+		// deserialize message body
+		var refMsg referenceMsg
+		err = json.Unmarshal([]byte(*out.Messages[i].Body), &refMsg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
+		}
+
+		// make call to s3 to get message
+		s3Obj, err := client.s3Client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: &refMsg.S3Bucket,
+			Key:    &refMsg.S3Key,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unable to get message from s3. %v", err)
+		}
+
+		// read large message
+		body, err := io.ReadAll(s3Obj.Body)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read message body from s3. %v", err)
+		}
+
+		// replace message body and attributes with s3 message
+		var s3LargeMsg largeMsg
+		err = json.Unmarshal(body, &s3LargeMsg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
+		}
+		out.Messages[i].Body = s3LargeMsg.Body
+		out.Messages[i].MessageAttributes = s3LargeMsg.MessageAttributes
+
+		// replace md5 hashes
+		out.Messages[i].MD5OfBody = &refMsg.SqsMd5HashBody
+		out.Messages[i].MD5OfMessageAttributes = &refMsg.SqsMd5HashMsgAttr
+
+		// modify receipt handle to contain s3 bucket and key info
+		newReceiptHandle := fmt.Sprintf("%s:%s:%s", *out.Messages[i].ReceiptHandle, refMsg.S3Bucket, refMsg.S3Key)
+		newReceiptHandle = base64.StdEncoding.EncodeToString([]byte(newReceiptHandle))
+		out.Messages[i].ReceiptHandle = &newReceiptHandle
 	}
 
-	// TODO: handle MD5 attributes
 	return out, nil
 }
 
