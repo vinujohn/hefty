@@ -24,7 +24,7 @@ import (
 
 const (
 	MaxSqsMessageLengthBytes        = 262_144
-	versionMessageKey               = "hefty-client-version"
+	heftyClientVersionMessageKey    = "hefty-client-version"
 	receiptHandlePrefix             = "hefty-message"
 	expectedReceiptHandleTokenCount = 4
 )
@@ -114,7 +114,7 @@ func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendM
 	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
 	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-	params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+	params.MessageAttributes[heftyClientVersionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 
 	out, err := client.SendMessage(ctx, params, optFns...)
 	if err != nil {
@@ -135,10 +135,9 @@ func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.
 func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	// request hefty message attribute
 	if params.MessageAttributeNames == nil {
-		params.MessageAttributeNames = []string{versionMessageKey}
+		params.MessageAttributeNames = []string{heftyClientVersionMessageKey}
 	} else {
-		// TODO: what happens when user has 10 message attributes listed,
-		params.MessageAttributeNames = append(params.MessageAttributeNames, versionMessageKey)
+		params.MessageAttributeNames = append(params.MessageAttributeNames, heftyClientVersionMessageKey)
 	}
 
 	out, err := client.ReceiveMessage(ctx, params, optFns...)
@@ -147,7 +146,7 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 	}
 
 	for i := range out.Messages {
-		if _, ok := out.Messages[i].MessageAttributes[versionMessageKey]; !ok {
+		if _, ok := out.Messages[i].MessageAttributes[heftyClientVersionMessageKey]; !ok {
 			continue
 		}
 
@@ -196,7 +195,7 @@ func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.Re
 }
 
 func (client *SqsClient) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
-	if params.ReceiptHandle != nil {
+	if params.ReceiptHandle == nil {
 		return client.DeleteMessage(ctx, params, optFns...)
 	}
 
@@ -212,22 +211,24 @@ func (client *SqsClient) DeleteHeftyMessage(ctx context.Context, params *sqs.Del
 		return client.DeleteMessage(ctx, params, optFns...)
 	}
 
+	// get tokens from receipt handle
 	tokens := strings.Split(decodedStr, "|")
-	if len(tokens) == expectedReceiptHandleTokenCount {
-		s3Bucket, s3Key := tokens[2], tokens[3]
-
-		// delete large message from s3
-		_, err = client.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-			Bucket: &s3Bucket,
-			Key:    &s3Key,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not delete s3 object for large message. %v", err)
-		}
-
-	} else {
+	if len(tokens) != expectedReceiptHandleTokenCount {
 		return nil, fmt.Errorf("expected number of tokens (%d) not available in receipt handle", expectedReceiptHandleTokenCount)
 	}
+
+	// delete hefty message from s3
+	receiptHandle, s3Bucket, s3Key := tokens[1], tokens[2], tokens[3]
+	_, err = client.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: &s3Bucket,
+		Key:    &s3Key,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("could not delete s3 object for large message. %v", err)
+	}
+
+	// replace receipt handle with real one to delete sqs message
+	params.ReceiptHandle = &receiptHandle
 
 	return client.DeleteMessage(ctx, params, optFns...)
 }

@@ -10,12 +10,48 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-func Test(t *testing.T) {
+func TestHeftyMessage(t *testing.T) {
 	_, err := testHeftySqsClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
 		MessageBody: aws.String(testLargeMsg256KB),
 		QueueUrl:    &testQueueUrl,
 		MessageAttributes: map[string]types.MessageAttributeValue{
-			"test": {
+			"test1": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test2": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test3": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test4": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test5": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test6": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test7": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test8": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test9": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(testLargeMsg256KB),
+			},
+			"test10": {
 				DataType:    aws.String("String"),
 				StringValue: aws.String(testLargeMsg256KB),
 			},
