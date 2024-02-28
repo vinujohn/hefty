@@ -65,64 +65,65 @@ func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string)
 }
 
 func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
-	// TODO: consider no message body but message attributes that are oversized
-	if msgSize(params) > MaxSqsMessageLengthBytes {
-		// create large message
-		s3LargeMsg := &largeMsg{
-			Body:              params.MessageBody,
-			MessageAttributes: params.MessageAttributes,
-		}
+	if params == nil ||
+		params.MessageBody == nil ||
+		len(*params.MessageBody) == 0 ||
+		msgSize(params) < MaxSqsMessageLengthBytes {
 
-		// serialize large message
-		jsonLargeMsg, err := json.Marshal(s3LargeMsg)
-		if err != nil {
-			return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
-		}
-
-		// create reference message
-		bodyHash, attributesHash := md5Hash(s3LargeMsg)
-		refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, bodyHash, attributesHash)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
-		}
-
-		// upload large message to s3
-		_, err = client.s3Client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket: aws.String(client.bucket),
-			Key:    aws.String(refMsg.S3Key),
-			Body:   bytes.NewReader(jsonLargeMsg),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("unable to upload large message to s3. %v", err)
-		}
-
-		// replace incoming message body with reference message
-		jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
-		if err != nil {
-			return nil, fmt.Errorf("unable to marshal json message. %v", err)
-		}
-		params.MessageBody = aws.String(string(jsonRefMsg))
-
-		//TODO: get correct library version
-		// overwrite message attributes (if any) with hefty message attributes
-		params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-		params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
-
-		out, err := client.SendMessage(ctx, params, optFns...)
-		if err != nil {
-			return out, err
-		}
-
-		// overwrite md5 values
-		out.MD5OfMessageBody = aws.String(bodyHash)
-		out.MD5OfMessageAttributes = aws.String(attributesHash)
-
-		return out, err
-	} else {
-		//TODO: handle MD5 attributes
-		//TODO: handle error by deleting s3 message
 		return client.SendMessage(ctx, params, optFns...)
 	}
+
+	// create large message
+	s3LargeMsg := &largeMsg{
+		Body:              params.MessageBody,
+		MessageAttributes: params.MessageAttributes,
+	}
+
+	// serialize large message
+	jsonLargeMsg, err := json.Marshal(s3LargeMsg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
+	}
+
+	// create reference message
+	bodyHash, attributesHash := md5Hash(s3LargeMsg)
+	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, bodyHash, attributesHash)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
+	}
+
+	// upload large message to s3
+	_, err = client.s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(client.bucket),
+		Key:    aws.String(refMsg.S3Key),
+		Body:   bytes.NewReader(jsonLargeMsg),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to upload large message to s3. %v", err)
+	}
+
+	// replace incoming message body with reference message
+	jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
+	if err != nil {
+		return nil, fmt.Errorf("unable to marshal json message. %v", err)
+	}
+	params.MessageBody = aws.String(string(jsonRefMsg))
+
+	//TODO: get correct library version
+	// overwrite message attributes (if any) with hefty message attributes
+	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
+	params.MessageAttributes[versionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+
+	out, err := client.SendMessage(ctx, params, optFns...)
+	if err != nil {
+		return out, err
+	}
+
+	// overwrite md5 values
+	out.MD5OfMessageBody = aws.String(bodyHash)
+	out.MD5OfMessageAttributes = aws.String(attributesHash)
+
+	return out, err
 }
 
 func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.SendMessageBatchInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageBatchOutput, error) {
@@ -244,23 +245,21 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, bodyHash, attributesHa
 }
 
 // msgSize retrieves the size of the message being sent
+// current sqs size constraints are 256KB for both the body and message attributes
 func msgSize(params *sqs.SendMessageInput) int {
 	var size int
 
-	if params != nil {
-		if params.MessageBody != nil {
-			size += len(*params.MessageBody)
-		}
+	size += len(*params.MessageBody)
 
-		if params.MessageAttributes != nil {
-			for k, v := range params.MessageAttributes {
-				size += len(k)
-				size += len(aws.ToString(v.DataType))
-				size += len(aws.ToString(v.StringValue))
-				size += len(v.BinaryValue)
-			}
+	if params.MessageAttributes != nil {
+		for k, v := range params.MessageAttributes {
+			size += len(k)
+			size += len(aws.ToString(v.DataType))
+			size += len(aws.ToString(v.StringValue))
+			size += len(v.BinaryValue)
 		}
 	}
+
 	return size
 }
 
