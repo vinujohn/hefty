@@ -7,12 +7,12 @@ A common solution to this problem is the idea of reference messaging, which is s
 
 ![claim check](https://learn.microsoft.com/en-us/azure/architecture/patterns/_images/claim-check.png)
 
-The Hefty message client provides similar functionality to the extended client libraries provided by AWS for the purpose of sending large messages to SQS. Unfortunately, these clients are currently only for Python and Java at this time.
+The Hefty SQS client wrapper provides similar functionality to the extended client libraries provided by AWS for the purpose of sending large messages to SQS. Unfortunately, these clients are currently only for Python and Java at this time.
 
 - [Amazon SQS Extended Client Library for Python](https://github.com/awslabs/amazon-sqs-python-extended-client-lib)
 - [Amazon SQS Extended Client Library for Java](https://github.com/awslabs/amazon-sqs-java-extended-client-lib)
 
-The Hefty message client uses AWS S3 as the data store for large messages, which normally cannot be handled by AWS SQS. It does this by calculating the message size for each message being sent. Messages that come under the AWS SQS message size limit will be sent to AWS SQS directly, whereas messages over this limit will be sent to AWS S3, and a reference message will be sent to AWS SQS instead. Receivers of messages sent by the Hefty message client will get the original message sent by the sender. Both the sender and receiver are unaware of how messages are stored and sent while using the same underlying API provided by the AWS SQS SDK.
+The Hefty SQS client wrapper uses AWS S3 as the data store for large messages, which normally cannot be handled by AWS SQS. It does this by calculating the message size for each message being sent. Messages that come under the AWS SQS message size limit will be sent to AWS SQS directly, whereas messages over this limit will be sent to AWS S3, and a reference message will be sent to AWS SQS instead. Receivers of messages sent by the Hefty SQS client wrapper will get the original message sent by the sender. Both the sender and receiver are unaware of how messages are stored and sent while using the same underlying API provided by the AWS SQS SDK.
 
 ## Usage
 
@@ -33,25 +33,25 @@ import (
 
 func main() {
 	// Create AWS SQS and AWS S3 clients as you would usually do.
-	// This is just one example.
+	// This is just one example of creating these clients using default config.
 	sdkConfig, _ := config.LoadDefaultConfig(context.TODO())
 	sqsClient := sqs.NewFromConfig(sdkConfig)
 	s3Client := s3.NewFromConfig(sdkConfig)
 
-	// Create a Hefty message client by passing in an AWS SQS client, AWS S3 client,
+	// Create a Hefty SQS client wrapper by passing in an AWS SQS client, AWS S3 client,
 	// and a AWS S3 bucket used to save messages larger than 256KB.
 	myBucket := "my-bucket"
-	heftyClient, err := hefty.NewSqsClient(sqsClient, s3Client, myBucket)
+	heftyClientWrapper, err := hefty.NewSqsClientWrapper(sqsClient, s3Client, myBucket)
 	if err != nil {
 		panic(err)
 	}
 
 	// Send a message to AWS SQS. Message sizes greater than 256KB will automatically
-	// be stored in S3. Hefty client methods use the same input and return types as
-	// the similar AWS SQS client method.
+	// be stored in S3. Hefty client wrapper methods use the same input and return types as
+	// the AWS SQS SDK method.
 	largeMessageBody := "..."
 	queueUrl := "https://sqs.us-west-2.amazonaws.com/123456789012/MyQueue"
-	_, err = heftyClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
+	_, err = heftyClientWrapper.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
 		MessageBody: &largeMessageBody,
 		QueueUrl:    &queueUrl,
 		MessageAttributes: map[string]types.MessageAttributeValue{
@@ -69,7 +69,7 @@ outer:
 	for {
 		// Receive messages from AWS SQS. Messages larger than 256KB will automatically
 		// be downloaded from AWS S3.
-		out, err := heftyClient.ReceiveHeftyMessage(context.TODO(), &sqs.ReceiveMessageInput{
+		out, err := heftyClientWrapper.ReceiveHeftyMessage(context.TODO(), &sqs.ReceiveMessageInput{
 			QueueUrl: &queueUrl,
 		})
 		if err != nil {
@@ -85,7 +85,7 @@ outer:
 
 			// Delete a message from AWS SQS. Messages larger than 256KB will automatically
 			// be deleted from AWS S3.
-			heftyClient.DeleteHeftyMessage(context.TODO(), &sqs.DeleteMessageInput{
+			heftyClientWrapper.DeleteHeftyMessage(context.TODO(), &sqs.DeleteMessageInput{
 				QueueUrl:      &queueUrl,
 				ReceiptHandle: msg.ReceiptHandle,
 			})
@@ -101,13 +101,13 @@ outer:
 
 ## Important Considerations
 ### Message Size Limit
-The Hefty message client currently has a message size limit of **2GB**. This includes the message body and all of the message attributes. The same calculation that AWS uses to calculate the [size of message attributes](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#message-attribute-components) is used by the Hefty message client as well.
+The Hefty SQS client wrapper currently has a message size limit of **2GB**. This includes the message body and all of the message attributes. The same calculation that AWS uses to calculate the [size of message attributes](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#message-attribute-components) is used by the Hefty SQS client wrapper as well.
 
 ### MD5 Digest
-For every message sent to AWS SQS, the MD5 digest is calculated for both the message body and message attributes. However, when the Hefty message client stores a large message in AWS S3, the reference message sent to AWS SQS will naturally have different MD5 digests in the system. To account for this, the Hefty message client will calculate the MD5 digest of both the message body and message attributes for the original message and store that information with the reference message. This allows the receiver of the message to get the correct MD5 digests via the Hefty message client. The [MD5 digest calculation for the message attributes](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#sqs-attributes-md5-message-digest-calculation) used by the Hefty message client is the same as AWS.
+For every message sent to AWS SQS, the MD5 digest is calculated for both the message body and message attributes. However, when the Hefty SQS client wrapper stores a large message in AWS S3, the reference message sent to AWS SQS will naturally have different MD5 digests in the system. To account for this, the Hefty SQS client wrapper will calculate the MD5 digest of both the message body and message attributes for the original message and store that information with the reference message. This allows the receiver of the message to get the correct MD5 digests via the Hefty SQS client wrapper. The [MD5 digest calculation for the message attributes](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#sqs-attributes-md5-message-digest-calculation) used by the Hefty SQS client wrapper is the same as AWS.
 
 ### Requesting Message Attributes
-The AWS SQS SDK allows a user to request message attributes that he or she is interested in receiving. The capability is provided to request all attributes available in a message or a subset of attributes. The latter may provide some benefit when message attributes are numerous and certain clients need only specific message attributes. However, when using the Hefty message client and receiving a large message, all attributes will be returned that were originally sent. Theoretically, since AWS restricts the number of message attributes that can be sent to 10, if a large message is sent via the Hefty message client, an unlimited number of message attributes can be sent and received as long as the message size constraint of **2GB** is met.
+The AWS SQS SDK allows a user to request message attributes that he or she is interested in receiving. The capability is provided to request all attributes available in a message or a subset of attributes. The latter may provide some benefit when message attributes are numerous and certain clients need only specific message attributes. However, when using the Hefty SQS client wrapper and receiving a large message, all attributes will be returned that were originally sent. Theoretically, since AWS restricts the number of message attributes that can be sent to 10, if a large message is sent via the Hefty SQS client wrapper, an unlimited number of message attributes can be sent and received as long as the message size constraint of **2GB** is met.
 
 ### Consistency
-It is important to be consistent when sending messages via the Hefty message client by using the corresponding Hefty API for receiving and deleting the same messages. Although it is possible to use the Hefty message client to send messages and then the AWS SQS SDK to receive and delete messages, undesirable behavior can occur. However, sending messages via the AWS SQS SDK and receiving and deleting messages via the Hefty message client should be OK.
+It is important to be consistent when sending messages via the Hefty SQS client wrapper by using the corresponding Hefty API for receiving and deleting the same messages. Although it is possible to use the Hefty SQS client wrapper to send messages and then the AWS SQS SDK to receive and delete messages, undesirable behavior can occur. However, sending messages via the AWS SQS SDK and receiving and deleting messages via the Hefty SQS client wrapper should be OK.

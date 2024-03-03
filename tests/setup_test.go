@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	testHeftySqsClient *hefty.SqsClient
+	testHeftySqsClient *hefty.SqsClientWrapper
 	testS3Client       *s3.Client
 	testBucket         string
 	testQueueUrl       string
@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// create hefty client
-	testHeftySqsClient, err = hefty.NewSqsClient(sqsClient, testS3Client, testBucket)
+	testHeftySqsClient, err = hefty.NewSqsClientWrapper(sqsClient, testS3Client, testBucket)
 	if err != nil {
 		log.Fatalf("could not create hefty client. %v", err)
 	}
