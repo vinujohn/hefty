@@ -63,6 +63,7 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 // SendHeftyMessage will calculate the messages size from `params` and determine if the message is large and should
 // be saved in AWS S3 if the MaxSqsMessageLengthBytes is exceeded.
 // Note that this function's signature matches that of the AWS SDK's SendMessage function.
+// TODO: use upload manager
 func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
 	// input validation; if invalid input let AWS SDK handle it
 	if params == nil ||
@@ -93,7 +94,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 
 	// create reference message
 	bodyHash, attributesHash := md5Hash(s3LargeMsg)
-	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, bodyHash, attributesHash)
+	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, attributesHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 	}
@@ -142,6 +143,7 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 // ReceiveMessageOutput. Messages not in S3 will not modify the return type. It is important to use this function
 // when `SendHeftyMessage` is used so that large messages can be downloaded from S3.
 // Note that this function's signature matches that of the AWS SDK's ReceiveMessage function.
+// TODO: use download manager
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	// request hefty message attribute
 	if params.MessageAttributeNames == nil {
@@ -247,18 +249,17 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 	return client.DeleteMessage(ctx, params, optFns...)
 }
 
-// https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
-func newSqsReferenceMessage(queueUrl *string, bucketName, bodyHash, attributesHash string) (*referenceMsg, error) {
+// Example queueUrl: https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
+func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attributesHash string) (*referenceMsg, error) {
 	if queueUrl != nil {
 		tokens := strings.Split(*queueUrl, "/")
 		if len(tokens) != 5 {
 			return nil, fmt.Errorf("expected 5 tokens when splitting queueUrl by '/' but only received %d", len(tokens))
 		} else {
-			regionTokens := strings.Split(tokens[2], ".")
 			return &referenceMsg{
-				S3Region:          regionTokens[1],
+				S3Region:          region,
 				S3Bucket:          bucketName,
-				S3Key:             fmt.Sprintf("%s/%s/%s/%s", tokens[3], regionTokens[1], tokens[4], uuid.New().String()),
+				S3Key:             fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
 				SqsMd5HashBody:    bodyHash,
 				SqsMd5HashMsgAttr: attributesHash,
 			}, nil
