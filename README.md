@@ -83,7 +83,7 @@ outer:
 		for _, msg := range out.Messages {
 			// perform some processing with "msg"
 			// ...
-			
+
 			// Delete a message from AWS SQS. Messages larger than 256KB will automatically
 			// be deleted from AWS S3.
 			heftyClientWrapper.DeleteHeftyMessage(context.TODO(), &sqs.DeleteMessageInput{
@@ -101,6 +101,14 @@ outer:
 ```
 
 ### Important Considerations
+#### Design
+Hefty has been designed to be as unobtrusive as possible, with little or no understanding needed to use it apart from understanding how AWS SQS works. Since it is a wrapper of the AWS SQS SDK, the Hefty API tries to mimic the exact apparent behavior of its AWS SQS SDK counterparts and even uses the same input types and return types. The following is a list of Hefty API methods and their AWS SQS SDK counterparts.
+| Hefty SQS Client Wrapper | AWS SQS SDK     | Input   | Output   |
+|----------------------|---------------------|--------|------- |
+| SendHeftyMessage(...)   | SendMessage(...)    | context.Context, *sqs.SendMessageInput, ...func(*sqs.Options) | *sqs.SendMessageOutput, error |
+| ReceiveHeftyMessage(...)| ReceiveMessage(...) | context.Context, *sqs.ReceiveMessageInput, ...func(*sqs.Options) | *sqs.ReceiveMessageOutput, error |
+| DeleteHeftyMessage(...) | DeleteMessage(...)  | context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options) | *sqs.DeleteMessageOutput, error|
+
 #### Message Size Limit
 The Hefty SQS Client Wrapper currently has a message size limit of **2GB** which is considerably greater than the AWS SQS message size limit of **256KB**. This includes the size of the message body and the sizes of the message attributes. The same criteria that AWS uses to calculate the [size of message attributes](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#message-attribute-components) is used by the Hefty SQS Client Wrapper as well.
 
