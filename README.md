@@ -82,7 +82,8 @@ outer:
 
 		for _, msg := range out.Messages {
 			// perform some processing with "msg"
-
+			// ...
+			
 			// Delete a message from AWS SQS. Messages larger than 256KB will automatically
 			// be deleted from AWS S3.
 			heftyClientWrapper.DeleteHeftyMessage(context.TODO(), &sqs.DeleteMessageInput{
