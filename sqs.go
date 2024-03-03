@@ -16,7 +16,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
@@ -42,22 +41,13 @@ type largeMsg struct {
 }
 
 func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClient, error) {
-	// check if bucket exits, if not create it using the current s3 settings
+	// check if bucket exits
 	if ok, err := bucketExists(s3Client, bucketName); !ok {
 		if err != nil {
 			return nil, err
 		}
 
-		_, err := s3Client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
-			Bucket: aws.String(bucketName),
-			CreateBucketConfiguration: &s3Types.CreateBucketConfiguration{
-				LocationConstraint: s3Types.BucketLocationConstraint(s3Client.Options().Region),
-			},
-		})
-
-		if err != nil {
-			return nil, fmt.Errorf("unable to create bucket '%s'. %v", bucketName, err)
-		}
+		return nil, fmt.Errorf("bucket %s does not exist or is not accessible", bucketName)
 	}
 
 	return &SqsClient{
@@ -142,6 +132,7 @@ func (client *SqsClient) SendHeftyMessageBatch(ctx context.Context, params *sqs.
 }
 
 func (client *SqsClient) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	// TODO: should we filter out message attributes from the original large message?
 	// request hefty message attribute
 	if params.MessageAttributeNames == nil {
 		params.MessageAttributeNames = []string{heftyClientVersionMessageKey}
