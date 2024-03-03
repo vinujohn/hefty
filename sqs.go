@@ -24,6 +24,7 @@ import (
 
 const (
 	MaxSqsMessageLengthBytes        = 262_144
+	MaxHeftyMessageLengthBytes      = 2_147_483_648
 	heftyClientVersionMessageKey    = "hefty-client-version"
 	receiptHandlePrefix             = "hefty-message"
 	expectedReceiptHandleTokenCount = 4
@@ -68,12 +69,19 @@ func NewSqsClient(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string)
 
 // TODO: make a size restriction of 2GB
 func (client *SqsClient) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
+	// input validation; if invalid input let AWS api handle it
 	if params == nil ||
 		params.MessageBody == nil ||
-		len(*params.MessageBody) == 0 ||
-		msgSize(params) < MaxSqsMessageLengthBytes {
+		len(*params.MessageBody) == 0 {
 
 		return client.SendMessage(ctx, params, optFns...)
+	}
+
+	// check message size
+	if size := msgSize(params); size <= MaxSqsMessageLengthBytes {
+		return client.SendMessage(ctx, params, optFns...)
+	} else if size > MaxHeftyMessageLengthBytes {
+		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", size, MaxHeftyMessageLengthBytes)
 	}
 
 	// create large message
