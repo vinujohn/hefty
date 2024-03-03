@@ -10,11 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
@@ -31,8 +31,10 @@ const (
 
 type SqsClientWrapper struct {
 	sqs.Client
-	bucket   string
-	s3Client *s3.Client
+	bucket     string
+	s3Client   *s3.Client
+	uploader   *s3manager.Uploader
+	downloader *s3manager.Downloader
 }
 
 type largeMsg struct {
@@ -54,16 +56,17 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 	}
 
 	return &SqsClientWrapper{
-		Client:   *sqsClient,
-		bucket:   bucketName,
-		s3Client: s3Client,
+		Client:     *sqsClient,
+		bucket:     bucketName,
+		s3Client:   s3Client,
+		uploader:   s3manager.NewUploader(s3Client),
+		downloader: s3manager.NewDownloader(s3Client),
 	}, nil
 }
 
 // SendHeftyMessage will calculate the messages size from `params` and determine if the message is large and should
 // be saved in AWS S3 if the MaxSqsMessageLengthBytes is exceeded.
 // Note that this function's signature matches that of the AWS SDK's SendMessage function.
-// TODO: use upload manager
 func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
 	// input validation; if invalid input let AWS SDK handle it
 	if params == nil ||
@@ -100,7 +103,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// upload large message to s3
-	_, err = client.s3Client.PutObject(ctx, &s3.PutObjectInput{
+	_, err = client.uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(client.bucket),
 		Key:    aws.String(refMsg.S3Key),
 		Body:   bytes.NewReader(jsonLargeMsg),
@@ -143,7 +146,6 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 // ReceiveMessageOutput. Messages not in S3 will not modify the return type. It is important to use this function
 // when `SendHeftyMessage` is used so that large messages can be downloaded from S3.
 // Note that this function's signature matches that of the AWS SDK's ReceiveMessage function.
-// TODO: use download manager
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	// request hefty message attribute
 	if params.MessageAttributeNames == nil {
@@ -170,7 +172,8 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// make call to s3 to get message
-		s3Obj, err := client.s3Client.GetObject(ctx, &s3.GetObjectInput{
+		buf := s3manager.NewWriteAtBuffer([]byte{})
+		_, err := client.downloader.Download(ctx, buf, &s3.GetObjectInput{
 			Bucket: &refMsg.S3Bucket,
 			Key:    &refMsg.S3Key,
 		})
@@ -178,15 +181,9 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 			return nil, fmt.Errorf("unable to get message from s3. %v", err)
 		}
 
-		// read large message
-		body, err := io.ReadAll(s3Obj.Body)
-		if err != nil {
-			return nil, fmt.Errorf("unable to read message body from s3. %v", err)
-		}
-
 		// replace message body and attributes with s3 message
 		var s3LargeMsg largeMsg
-		err = json.Unmarshal(body, &s3LargeMsg)
+		err = json.Unmarshal(buf.Bytes(), &s3LargeMsg)
 		if err != nil {
 			return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
 		}
