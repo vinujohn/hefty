@@ -26,10 +26,11 @@ type largeSqsMsg struct {
 }
 
 const (
-	lengthSize               = 4
-	transportTypeSize        = 1
-	stringTransportType byte = 1
-	binaryTransportType byte = 2
+	lengthSize                    = 4
+	transportTypeSize             = 1
+	numLengthSizesPerMsgAttr      = 3
+	stringTransportType      byte = 1
+	binaryTransportType      byte = 2
 )
 
 /*
@@ -38,7 +39,7 @@ const (
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
 func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
-	b := make([]byte, 0, msgSize+lengthSize+(len(msg.MessageAttributes)*(3*lengthSize+transportTypeSize)))
+	b := make([]byte, 0, msgSize+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
 
 	// write body

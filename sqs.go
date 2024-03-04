@@ -94,7 +94,10 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 
 	// create md5 digests
 	bodyHash := md5Digest(serialized[bodyOffset:msgAttrOffset])
-	msgAttrHash := md5Digest(serialized[msgAttrOffset:])
+	msgAttrHash := ""
+	if len(largeMsg.MessageAttributes) > 0 {
+		msgAttrHash = md5Digest(serialized[msgAttrOffset:])
+	}
 
 	// create reference message
 	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, msgAttrHash)

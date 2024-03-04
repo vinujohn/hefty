@@ -36,9 +36,11 @@ func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error when trying to serialize. %v", err)
 	}
-	assert.Len(t, serialized, size+3*13+4)
+	assert.Len(t, serialized, size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	assert.Equal(t, "098f6bcd4621d373cade4e832627b4f6", md5Digest(serialized[bodyOffset:msgAttrOffset]))
-	assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", md5Digest(serialized[msgAttrOffset:]))
+	if len(msg.MessageAttributes) > 0 {
+		assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", md5Digest(serialized[msgAttrOffset:]))
+	}
 
 	dMsg := &largeSqsMsg{}
 	if err := dMsg.Deserialize(serialized); err != nil {
