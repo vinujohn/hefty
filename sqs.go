@@ -87,13 +87,17 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// serialize large message
-	serialized, bodyHash, attributesHash, err := largeMsg.Serialize(size)
+	serialized, bodyOffset, msgAttrOffset, err := largeMsg.Serialize(size)
 	if err != nil {
 		return nil, fmt.Errorf("unable to serialize message. %v", err)
 	}
 
+	// create md5 digests
+	bodyHash := md5Digest(serialized[bodyOffset:msgAttrOffset])
+	msgAttrHash := md5Digest(serialized[msgAttrOffset:])
+
 	// create reference message
-	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, attributesHash)
+	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 	}
@@ -127,7 +131,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 
 	// overwrite md5 values
 	out.MD5OfMessageBody = aws.String(bodyHash)
-	out.MD5OfMessageAttributes = aws.String(attributesHash)
+	out.MD5OfMessageAttributes = aws.String(msgAttrHash)
 
 	return out, err
 }

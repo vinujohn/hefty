@@ -37,7 +37,7 @@ const (
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyHash string, attributesHash string, err error) {
+func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
 	b := make([]byte, 0, msgSize+lengthSize+(len(msg.MessageAttributes)*(3*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
 
@@ -48,9 +48,9 @@ func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyHash stri
 		return
 	}
 
-	// calculate hash for body
-	hash := md5.Sum(buf.Bytes()[lengthSize:])
-	bodyHash = hex.EncodeToString(hash[:])
+	// calculate offsets
+	bodyOffset = lengthSize
+	msgAttrOffset = len(*msg.Body) + bodyOffset
 
 	if msg.MessageAttributes != nil && len(msg.MessageAttributes) > 0 {
 		type keyValue struct {
@@ -113,9 +113,6 @@ func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyHash stri
 				return
 			}
 		}
-
-		hash := md5.Sum(buf.Bytes()[len(*msg.Body)+lengthSize:])
-		attributesHash = hex.EncodeToString(hash[:])
 	}
 
 	serialized = buf.Bytes()
@@ -249,4 +246,9 @@ func readNext(reader *bytes.Reader) ([]byte, bool) {
 	}
 
 	return data, read == int(length)
+}
+
+func md5Digest(buf []byte) string {
+	hash := md5.Sum(buf)
+	return hex.EncodeToString(hash[:])
 }
