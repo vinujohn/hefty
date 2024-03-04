@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -28,10 +27,7 @@ func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
 		},
 	}
 
-	size, _ := msgSize(&sqs.SendMessageInput{
-		MessageBody:       msg.Body,
-		MessageAttributes: msg.MessageAttributes,
-	})
+	size, _ := msg.Size()
 	serialized, bodyOffset, msgAttrOffset, err := msg.Serialize(size)
 	if err != nil {
 		t.Fatalf("error when trying to serialize. %v", err)

@@ -67,8 +67,14 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 		return client.SendMessage(ctx, params, optFns...)
 	}
 
+	// create large message
+	largeMsg := &largeSqsMsg{
+		Body:              params.MessageBody,
+		MessageAttributes: params.MessageAttributes,
+	}
+
 	// calculate message size
-	size, err := msgSize(params)
+	size, err := largeMsg.Size()
 	if err != nil {
 		return nil, fmt.Errorf("unable to check message size. %v", err)
 	}
@@ -78,12 +84,6 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 		return client.SendMessage(ctx, params, optFns...)
 	} else if size > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", size, MaxHeftyMessageLengthBytes)
-	}
-
-	// create large message
-	largeMsg := &largeSqsMsg{
-		Body:              params.MessageBody,
-		MessageAttributes: params.MessageAttributes,
 	}
 
 	// serialize large message
@@ -269,29 +269,4 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attr
 	}
 
 	return nil, errors.New("queueUrl is nil")
-}
-
-// msgSize retrieves the size of the message being sent
-// current sqs size constraints are 256KB for both the body and message attributes
-func msgSize(params *sqs.SendMessageInput) (int, error) {
-	var size int
-
-	size += len(*params.MessageBody)
-
-	if params.MessageAttributes != nil {
-		for k, v := range params.MessageAttributes {
-			dataType := aws.ToString(v.DataType)
-			size += len(k)
-			size += len(dataType)
-			if strings.HasPrefix(dataType, "String") || strings.HasPrefix(dataType, "Number") {
-				size += len(aws.ToString(v.StringValue))
-			} else if strings.HasPrefix(dataType, "Binary") {
-				size += len(v.BinaryValue)
-			} else {
-				return -1, fmt.Errorf("encountered unexpected data type for message: %s", dataType)
-			}
-		}
-	}
-
-	return size, nil
 }

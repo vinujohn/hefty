@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
@@ -252,4 +253,27 @@ func readNext(reader *bytes.Reader) ([]byte, bool) {
 func md5Digest(buf []byte) string {
 	hash := md5.Sum(buf)
 	return hex.EncodeToString(hash[:])
+}
+
+func (msg *largeSqsMsg) Size() (int, error) {
+	var size int
+
+	size += len(*msg.Body)
+
+	if msg.MessageAttributes != nil {
+		for k, v := range msg.MessageAttributes {
+			dataType := aws.ToString(v.DataType)
+			size += len(k)
+			size += len(dataType)
+			if strings.HasPrefix(dataType, "String") || strings.HasPrefix(dataType, "Number") {
+				size += len(aws.ToString(v.StringValue))
+			} else if strings.HasPrefix(dataType, "Binary") {
+				size += len(v.BinaryValue)
+			} else {
+				return -1, fmt.Errorf("encountered unexpected data type for message: %s", dataType)
+			}
+		}
+	}
+
+	return size, nil
 }
