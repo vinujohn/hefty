@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -58,8 +59,13 @@ func TestMain(m *testing.M) {
 	}
 	testQueueUrl = *q.QueueUrl
 
-	exitCode := m.Run()
+	var exitCode *int = new(int)
+	defer cleanup(exitCode)
 
+	*exitCode = m.Run()
+}
+
+func cleanup(exitCode *int) {
 	// delete all remaining objects in test bucket
 	var continueToken *string
 	for {
@@ -101,7 +107,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// delete test bucket
-	_, err = testS3Client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+	_, err := testS3Client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
 		Bucket: &testBucket,
 	})
 	if err != nil {
@@ -113,8 +119,18 @@ func TestMain(m *testing.M) {
 		QueueUrl: &testQueueUrl,
 	})
 	if err != nil {
-		log.Printf("could not delete queue %s. %v", queueName, err)
+		log.Printf("could not delete queue %s. %v", testQueueUrl, err)
 	}
 
-	os.Exit(exitCode)
+	os.Exit(*exitCode)
+}
+
+func createMessageText(numBytes int) string {
+	builder := strings.Builder{}
+
+	for i := 0; i < numBytes; i++ {
+		builder.WriteByte(65) // append letter 'A'
+	}
+
+	return builder.String()
 }

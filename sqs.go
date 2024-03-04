@@ -3,14 +3,10 @@ package hefty
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
 	"encoding/base64"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -23,7 +19,7 @@ import (
 
 const (
 	MaxSqsMessageLengthBytes        = 262_144
-	MaxHeftyMessageLengthBytes      = 2_147_483_648
+	MaxHeftyMessageLengthBytes      = 26_214_400
 	heftyClientVersionMessageKey    = "hefty-client-version"
 	receiptHandlePrefix             = "hefty-message"
 	expectedReceiptHandleTokenCount = 4
@@ -35,11 +31,6 @@ type SqsClientWrapper struct {
 	s3Client   *s3.Client
 	uploader   *s3manager.Uploader
 	downloader *s3manager.Downloader
-}
-
-type largeMsg struct {
-	Body              *string                                   `json:"body"`
-	MessageAttributes map[string]sqsTypes.MessageAttributeValue `json:"message_attributes"`
 }
 
 // NewSqsClientWrapper will create a new Hefty SQS client wrapper using an existing AWS SQS client and AWS S3 client.
@@ -76,27 +67,29 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 		return client.SendMessage(ctx, params, optFns...)
 	}
 
-	// check message size
-	if size := msgSize(params); size <= MaxSqsMessageLengthBytes {
+	// calculate message size
+	size, err := msgSize(params)
+	if err != nil {
+		return nil, fmt.Errorf("unable to check message size. %v", err)
+	}
+
+	// validate message size
+	if size <= MaxSqsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
 	} else if size > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", size, MaxHeftyMessageLengthBytes)
 	}
 
 	// create large message
-	s3LargeMsg := &largeMsg{
+	largeMsg := &largeSqsMsg{
 		Body:              params.MessageBody,
 		MessageAttributes: params.MessageAttributes,
 	}
 
 	// serialize large message
-	jsonLargeMsg, err := json.Marshal(s3LargeMsg)
-	if err != nil {
-		return nil, fmt.Errorf("unable to marshal sqs message as json. %v", err)
-	}
+	serialized, bodyHash, attributesHash := largeMsg.Serialize(size)
 
 	// create reference message
-	bodyHash, attributesHash := md5Hash(s3LargeMsg)
 	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, attributesHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
@@ -106,7 +99,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	_, err = client.uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(client.bucket),
 		Key:    aws.String(refMsg.S3Key),
-		Body:   bytes.NewReader(jsonLargeMsg),
+		Body:   bytes.NewReader(serialized),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to upload large message to s3. %v", err)
@@ -181,14 +174,16 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 			return nil, fmt.Errorf("unable to get message from s3. %v", err)
 		}
 
-		// replace message body and attributes with s3 message
-		var s3LargeMsg largeMsg
-		err = json.Unmarshal(buf.Bytes(), &s3LargeMsg)
+		// decode message from s3
+		largeMsg := &largeSqsMsg{}
+		err = largeMsg.Deserialize(buf.Bytes())
 		if err != nil {
-			return nil, fmt.Errorf("unable to deserialize s3 message body. %v", err)
+			return nil, fmt.Errorf("unable to decode bytes into large message type. %v", err)
 		}
-		out.Messages[i].Body = s3LargeMsg.Body
-		out.Messages[i].MessageAttributes = s3LargeMsg.MessageAttributes
+
+		// replace message body and attributes with s3 message
+		out.Messages[i].Body = largeMsg.Body
+		out.Messages[i].MessageAttributes = largeMsg.MessageAttributes
 
 		// replace md5 hashes
 		out.Messages[i].MD5OfBody = &refMsg.SqsMd5HashBody
@@ -268,72 +263,25 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attr
 
 // msgSize retrieves the size of the message being sent
 // current sqs size constraints are 256KB for both the body and message attributes
-func msgSize(params *sqs.SendMessageInput) int {
+func msgSize(params *sqs.SendMessageInput) (int, error) {
 	var size int
 
 	size += len(*params.MessageBody)
 
 	if params.MessageAttributes != nil {
 		for k, v := range params.MessageAttributes {
+			dataType := aws.ToString(v.DataType)
 			size += len(k)
-			size += len(aws.ToString(v.DataType))
-			size += len(aws.ToString(v.StringValue))
-			size += len(v.BinaryValue)
-		}
-	}
-
-	return size
-}
-
-// md5Hash gets the md5 hash for both the body and message attributes of a large message
-func md5Hash(msg *largeMsg) (bodyHash string, attributesHash string) {
-	type keyValue struct {
-		key   string
-		value sqsTypes.MessageAttributeValue
-	}
-
-	if msg.Body != nil {
-		hash := md5.Sum([]byte(*msg.Body))
-		bodyHash = hex.EncodeToString(hash[:])
-	}
-
-	if msg.MessageAttributes != nil {
-
-		// sort slice of map keys and values
-		msgAttributes := []keyValue{}
-		for k, v := range msg.MessageAttributes {
-			msgAttributes = append(msgAttributes, keyValue{
-				key:   k,
-				value: v,
-			})
-		}
-		sort.Slice(msgAttributes, func(i, j int) bool {
-			return msgAttributes[i].key < msgAttributes[j].key
-		})
-
-		buf := new(bytes.Buffer)
-		for _, attr := range msgAttributes {
-			binary.Write(buf, binary.BigEndian, int32(len(attr.key)))
-			buf.Write([]byte(attr.key))
-			if attr.value.DataType != nil {
-				binary.Write(buf, binary.BigEndian, int32(len(*attr.value.DataType)))
-				buf.Write([]byte(*attr.value.DataType))
-
-				if attr.value.StringValue != nil {
-					buf.Write([]byte{1})
-					binary.Write(buf, binary.BigEndian, int32(len(*attr.value.StringValue)))
-					buf.Write([]byte(*attr.value.StringValue))
-				} else if len(attr.value.BinaryValue) > 0 {
-					buf.Write([]byte{2})
-					binary.Write(buf, binary.BigEndian, int32(len(attr.value.BinaryValue)))
-					buf.Write(attr.value.BinaryValue)
-				}
+			size += len(dataType)
+			if strings.HasPrefix(dataType, "String") || strings.HasPrefix(dataType, "Number") {
+				size += len(aws.ToString(v.StringValue))
+			} else if strings.HasPrefix(dataType, "Binary") {
+				size += len(v.BinaryValue)
+			} else {
+				return -1, fmt.Errorf("encountered unexpected data type for message: %s", dataType)
 			}
 		}
-
-		hash := md5.Sum(buf.Bytes())
-		attributesHash = hex.EncodeToString(hash[:])
 	}
 
-	return
+	return size, nil
 }
