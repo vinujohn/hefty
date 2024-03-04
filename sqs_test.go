@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLargeMessageSerialize(t *testing.T) {
+func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
 	msg := &largeSqsMsg{
 		Body: aws.String("test"),
 		MessageAttributes: map[string]types.MessageAttributeValue{
@@ -27,6 +27,7 @@ func TestLargeMessageSerialize(t *testing.T) {
 			},
 		},
 	}
+
 	size, _ := msgSize(&sqs.SendMessageInput{
 		MessageBody:       msg.Body,
 		MessageAttributes: msg.MessageAttributes,
@@ -35,32 +36,7 @@ func TestLargeMessageSerialize(t *testing.T) {
 	assert.Len(t, serialized, size+3*13+4)
 	assert.Equal(t, "098f6bcd4621d373cade4e832627b4f6", bHash)
 	assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", aHash)
-	t.Logf("MD5 Digest, Body:%s Attributes:%s", bHash, aHash)
-}
 
-func TestLargeMessageDeserialize(t *testing.T) {
-	msg := &largeSqsMsg{
-		Body: aws.String("test"),
-		MessageAttributes: map[string]types.MessageAttributeValue{
-			"test3": {
-				DataType:    aws.String("Binary"),
-				BinaryValue: []byte{1, 2, 3},
-			},
-			"test": {
-				DataType:    aws.String("String"),
-				StringValue: aws.String("test"),
-			},
-			"test2": {
-				DataType:    aws.String("Number"),
-				StringValue: aws.String("123"),
-			},
-		},
-	}
-	size, _ := msgSize(&sqs.SendMessageInput{
-		MessageBody:       msg.Body,
-		MessageAttributes: msg.MessageAttributes,
-	})
-	serialized, _, _ := msg.Serialize(size)
 	dMsg := &largeSqsMsg{}
 	if err := dMsg.Deserialize(serialized); err != nil {
 		t.Fatalf("error from deserialize. %v", err)
