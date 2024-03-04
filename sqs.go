@@ -68,26 +68,20 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// create large message
-	largeMsg := &largeSqsMsg{
-		Body:              params.MessageBody,
-		MessageAttributes: params.MessageAttributes,
-	}
-
-	// calculate message size
-	size, err := largeMsg.Size()
+	largeMsg, err := newLargeSqsMessage(params.MessageBody, params.MessageAttributes)
 	if err != nil {
-		return nil, fmt.Errorf("unable to check message size. %v", err)
+		return nil, fmt.Errorf("unable to create large message. %v", err)
 	}
 
 	// validate message size
-	if size <= MaxSqsMessageLengthBytes {
+	if largeMsg.Size <= MaxSqsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
-	} else if size > MaxHeftyMessageLengthBytes {
-		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", size, MaxHeftyMessageLengthBytes)
+	} else if largeMsg.Size > MaxHeftyMessageLengthBytes {
+		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", largeMsg.Size, MaxHeftyMessageLengthBytes)
 	}
 
 	// serialize large message
-	serialized, bodyOffset, msgAttrOffset, err := largeMsg.Serialize(size)
+	serialized, bodyOffset, msgAttrOffset, err := largeMsg.Serialize()
 	if err != nil {
 		return nil, fmt.Errorf("unable to serialize message. %v", err)
 	}
@@ -185,8 +179,7 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// decode message from s3
-		largeMsg := &largeSqsMsg{}
-		err = largeMsg.Deserialize(buf.Bytes())
+		largeMsg, err := deserializeLargeSqsMsg(buf.Bytes())
 		if err != nil {
 			return nil, fmt.Errorf("unable to decode bytes into large message type. %v", err)
 		}

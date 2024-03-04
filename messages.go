@@ -24,6 +24,7 @@ type referenceMsg struct {
 type largeSqsMsg struct {
 	Body              *string
 	MessageAttributes map[string]sqsTypes.MessageAttributeValue
+	Size              int
 }
 
 const (
@@ -34,13 +35,29 @@ const (
 	binaryTransportType      byte = 2
 )
 
+func newLargeSqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageAttributeValue) (*largeSqsMsg, error) {
+	msg := &largeSqsMsg{
+		Body:              body,
+		MessageAttributes: msgAttributes,
+	}
+
+	var err error
+	msg.Size, err = msgSize(msg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to calculate message size. %v", err)
+	}
+
+	return msg, nil
+}
+
 /*
 |length|body|length|attribute name|length|attribute datatype|attribute transport type|length|attribute value|
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
-	b := make([]byte, 0, msgSize+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
+func (msg *largeSqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
+	// create a buffer
+	b := make([]byte, 0, msg.Size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
 
 	// write body
@@ -170,31 +187,33 @@ func writeNext(buf *bytes.Buffer, data any) error {
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *largeSqsMsg) Deserialize(in []byte) error {
+func deserializeLargeSqsMsg(in []byte) (*largeSqsMsg, error) {
 	reader := bytes.NewReader(in)
 
 	var data []byte
 	var ok bool
 
 	// read body
+	var body string
 	if data, ok = readNext(reader); ok {
-		body := string(data)
-		msg.Body = &body
+		body = string(data)
 	} else {
-		return fmt.Errorf("unable to read body during deserialization")
+		return nil, fmt.Errorf("unable to read body during deserialization")
+	}
+
+	// create message attributes
+	var msgAttr map[string]sqsTypes.MessageAttributeValue
+	if reader.Len() > 0 {
+		msgAttr = make(map[string]sqsTypes.MessageAttributeValue)
 	}
 
 	for reader.Len() > 0 {
-		if msg.MessageAttributes == nil {
-			msg.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-		}
-
 		// read attribute name
 		var attrName string
 		if data, ok = readNext(reader); ok {
 			attrName = string(data)
 		} else {
-			return fmt.Errorf("unable to read attribute name during deserialization")
+			return nil, fmt.Errorf("unable to read attribute name during deserialization")
 		}
 
 		// read attribute data type
@@ -202,36 +221,36 @@ func (msg *largeSqsMsg) Deserialize(in []byte) error {
 		if data, ok = readNext(reader); ok {
 			attrDataType = string(data)
 		} else {
-			return fmt.Errorf("unable to read attribute name during deserialization")
+			return nil, fmt.Errorf("unable to read attribute name during deserialization")
 		}
 
 		// read attribute transport type
 		attrTransportType, err := reader.ReadByte()
 		if err != nil {
-			return fmt.Errorf("unable to read attribute transport type during deserialization. %v", err)
+			return nil, fmt.Errorf("unable to read attribute transport type during deserialization. %v", err)
 		}
 
 		// read attribute value
 		if data, ok = readNext(reader); !ok {
-			return fmt.Errorf("unable to read attribute value during deserialization")
+			return nil, fmt.Errorf("unable to read attribute value during deserialization")
 		}
 
 		// construct message attribute
 		if attrTransportType == stringTransportType {
-			attrValue := string(data)
-			msg.MessageAttributes[attrName] = sqsTypes.MessageAttributeValue{
+			strValue := string(data)
+			msgAttr[attrName] = sqsTypes.MessageAttributeValue{
 				DataType:    &attrDataType,
-				StringValue: &attrValue,
+				StringValue: &strValue,
 			}
 		} else if attrTransportType == binaryTransportType {
-			msg.MessageAttributes[attrName] = sqsTypes.MessageAttributeValue{
+			msgAttr[attrName] = sqsTypes.MessageAttributeValue{
 				DataType:    &attrDataType,
 				BinaryValue: data,
 			}
 		}
 	}
 
-	return nil
+	return newLargeSqsMessage(&body, msgAttr)
 }
 
 func readNext(reader *bytes.Reader) ([]byte, bool) {
@@ -255,9 +274,8 @@ func md5Digest(buf []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (msg *largeSqsMsg) Size() (int, error) {
+func msgSize(msg *largeSqsMsg) (int, error) {
 	var size int
-
 	size += len(*msg.Body)
 
 	if msg.MessageAttributes != nil {
@@ -270,7 +288,7 @@ func (msg *largeSqsMsg) Size() (int, error) {
 			} else if strings.HasPrefix(dataType, "Binary") {
 				size += len(v.BinaryValue)
 			} else {
-				return -1, fmt.Errorf("encountered unexpected data type for message: %s", dataType)
+				return -1, fmt.Errorf("encountered unexpected data type for message attribute: %s", dataType)
 			}
 		}
 	}
