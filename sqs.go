@@ -87,7 +87,10 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// serialize large message
-	serialized, bodyHash, attributesHash := largeMsg.Serialize(size)
+	serialized, bodyHash, attributesHash, err := largeMsg.Serialize(size)
+	if err != nil {
+		return nil, fmt.Errorf("unable to serialize message. %v", err)
+	}
 
 	// create reference message
 	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, attributesHash)

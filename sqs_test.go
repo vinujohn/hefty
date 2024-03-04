@@ -32,7 +32,10 @@ func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
 		MessageBody:       msg.Body,
 		MessageAttributes: msg.MessageAttributes,
 	})
-	serialized, bHash, aHash := msg.Serialize(size)
+	serialized, bHash, aHash, err := msg.Serialize(size)
+	if err != nil {
+		t.Fatalf("error when trying to serialize. %v", err)
+	}
 	assert.Len(t, serialized, size+3*13+4)
 	assert.Equal(t, "098f6bcd4621d373cade4e832627b4f6", bHash)
 	assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", aHash)

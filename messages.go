@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
@@ -24,23 +25,34 @@ type largeSqsMsg struct {
 	MessageAttributes map[string]sqsTypes.MessageAttributeValue
 }
 
+const (
+	lengthSize               = 4
+	transportTypeSize        = 1
+	stringTransportType byte = 1
+	binaryTransportType byte = 2
+)
+
 /*
 |length|body|length|attribute name|length|attribute datatype|attribute transport type|length|attribute value|
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyHash string, attributesHash string) {
-	//msgSize + 4 bytes for length of body + (number of attributes * 13 bytes for length and transport type)
-	b := make([]byte, 0, msgSize+4+(len(msg.MessageAttributes)*13))
+func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyHash string, attributesHash string, err error) {
+	b := make([]byte, 0, msgSize+lengthSize+(len(msg.MessageAttributes)*(3*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
-	binary.Write(buf, binary.BigEndian, int32(len(*msg.Body)))
-	buf.WriteString(*msg.Body) //TODO: handle error
+
+	// write body
+	err = writeNext(buf, msg.Body)
+	if err != nil {
+		err = fmt.Errorf("unable to write message body to buffer. %s", err)
+		return
+	}
 
 	// calculate hash for body
-	hash := md5.Sum(buf.Bytes()[4:])
+	hash := md5.Sum(buf.Bytes()[lengthSize:])
 	bodyHash = hex.EncodeToString(hash[:])
 
-	if msg.MessageAttributes != nil {
+	if msg.MessageAttributes != nil && len(msg.MessageAttributes) > 0 {
 		type keyValue struct {
 			key   string
 			value sqsTypes.MessageAttributeValue
@@ -59,31 +71,99 @@ func (msg *largeSqsMsg) Serialize(msgSize int) (serialized []byte, bodyHash stri
 		})
 
 		for _, attr := range msgAttributes {
-			binary.Write(buf, binary.BigEndian, int32(len(attr.key)))
-			buf.Write([]byte(attr.key))
-			if attr.value.DataType != nil {
-				binary.Write(buf, binary.BigEndian, int32(len(*attr.value.DataType)))
-				buf.Write([]byte(*attr.value.DataType))
+			// write message attribute key
+			err = writeNext(buf, attr.key)
+			if err != nil {
+				err = fmt.Errorf("unable to write message attribute key to buffer. %s", err)
+				return
+			}
 
-				if attr.value.StringValue != nil {
-					buf.Write([]byte{1})
-					binary.Write(buf, binary.BigEndian, int32(len(*attr.value.StringValue)))
-					buf.Write([]byte(*attr.value.StringValue))
-				} else if len(attr.value.BinaryValue) > 0 {
-					buf.Write([]byte{2})
-					binary.Write(buf, binary.BigEndian, int32(len(attr.value.BinaryValue)))
-					buf.Write(attr.value.BinaryValue)
+			// write message attribute data type
+			err = writeNext(buf, attr.value.DataType)
+			if err != nil {
+				err = fmt.Errorf("unable to write message attribute data type to buffer. %s", err)
+				return
+			}
+
+			// write message attribute value
+			if strings.HasPrefix(*attr.value.DataType, "String") || strings.HasPrefix(*attr.value.DataType, "Number") {
+				err = writeNext(buf, stringTransportType)
+				if err != nil {
+					err = fmt.Errorf("unable to write message attribute transport type (string) to buffer. %s", err)
+					return
 				}
+				err = writeNext(buf, attr.value.StringValue)
+				if err != nil {
+					err = fmt.Errorf("unable to write message attribute string value to buffer. %s", err)
+					return
+				}
+			} else if strings.HasPrefix(*attr.value.DataType, "Binary") {
+				err = writeNext(buf, binaryTransportType)
+				if err != nil {
+					err = fmt.Errorf("unable to write message attribute transport type (binary) to buffer. %s", err)
+					return
+				}
+				err = writeNext(buf, attr.value.BinaryValue)
+				if err != nil {
+					err = fmt.Errorf("unable to write message attribute binary value to buffer. %s", err)
+					return
+				}
+			} else {
+				err = fmt.Errorf("unexpected message attribute data type %s", *attr.value.DataType)
+				return
 			}
 		}
 
-		hash := md5.Sum(buf.Bytes()[len(*msg.Body)+4:])
+		hash := md5.Sum(buf.Bytes()[len(*msg.Body)+lengthSize:])
 		attributesHash = hex.EncodeToString(hash[:])
 	}
 
 	serialized = buf.Bytes()
 
 	return
+}
+
+func writeNext(buf *bytes.Buffer, data any) error {
+	var err error
+
+	switch v := data.(type) {
+	case *string:
+		err = binary.Write(buf, binary.BigEndian, int32(len(*v)))
+		if err != nil {
+			return err
+		}
+		_, err = buf.WriteString(*v)
+		if err != nil {
+			return err
+		}
+	case []byte:
+		err = binary.Write(buf, binary.BigEndian, int32(len(v)))
+		if err != nil {
+			return err
+		}
+		_, err = buf.Write(v)
+		if err != nil {
+			return err
+		}
+	case string:
+		err = binary.Write(buf, binary.BigEndian, int32(len(v)))
+		if err != nil {
+			return err
+		}
+		_, err = buf.WriteString(v)
+		if err != nil {
+			return err
+		}
+	case byte:
+		err = buf.WriteByte(v)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown type to serialize")
+	}
+
+	return nil
 }
 
 /*
@@ -138,13 +218,13 @@ func (msg *largeSqsMsg) Deserialize(in []byte) error {
 		}
 
 		// construct message attribute
-		if attrTransportType == 1 {
+		if attrTransportType == stringTransportType {
 			attrValue := string(data)
 			msg.MessageAttributes[attrName] = sqsTypes.MessageAttributeValue{
 				DataType:    &attrDataType,
 				StringValue: &attrValue,
 			}
-		} else if attrTransportType == 2 {
+		} else if attrTransportType == binaryTransportType {
 			msg.MessageAttributes[attrName] = sqsTypes.MessageAttributeValue{
 				DataType:    &attrDataType,
 				BinaryValue: data,
@@ -156,7 +236,7 @@ func (msg *largeSqsMsg) Deserialize(in []byte) error {
 }
 
 func readNext(reader *bytes.Reader) ([]byte, bool) {
-	length := int32(4)
+	length := int32(lengthSize)
 	err := binary.Read(reader, binary.BigEndian, &length)
 	if err != nil {
 		return nil, false
