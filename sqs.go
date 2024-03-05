@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	MaxSqsMessageLengthBytes        = 262_144    // 256KB
-	MaxHeftyMessageLengthBytes      = 33_554_432 // 32MB
-	heftyClientVersionMessageKey    = "hefty-client-version"
-	receiptHandlePrefix             = "hefty-message"
-	expectedReceiptHandleTokenCount = 4
+	MaxSqsMessageLengthBytes             = 262_144    // 256KB
+	MaxHeftyMessageLengthBytes           = 33_554_432 // 32MB
+	heftyClientVersionMessageKey         = "hefty-client-version"
+	receiptHandlePrefix                  = "hefty-message"
+	expectedHeftyReceiptHandleTokenCount = 4
 )
 
 type SqsClientWrapper struct {
@@ -224,8 +224,8 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 
 	// get tokens from receipt handle
 	tokens := strings.Split(decodedStr, "|")
-	if len(tokens) != expectedReceiptHandleTokenCount {
-		return nil, fmt.Errorf("expected number of tokens (%d) not available in receipt handle", expectedReceiptHandleTokenCount)
+	if len(tokens) != expectedHeftyReceiptHandleTokenCount {
+		return nil, fmt.Errorf("expected number of tokens (%d) not available in receipt handle", expectedHeftyReceiptHandleTokenCount)
 	}
 
 	// delete hefty message from s3
