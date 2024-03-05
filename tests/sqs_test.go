@@ -68,6 +68,7 @@ func TestHeftyMessageEndToEnd(t *testing.T) {
 		},
 	}
 
+	t.Logf("%s: finished creating message", time.Now().String())
 	_, err := testHeftySqsClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
 		MessageBody:       aws.String(msgTextBody),
 		QueueUrl:          &testQueueUrl,
@@ -76,6 +77,7 @@ func TestHeftyMessageEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not send hefty message. %v", err)
 	}
+	t.Logf("%s: finished sending message", time.Now().String())
 
 	i := 0
 	for i < 3 {
@@ -87,6 +89,8 @@ func TestHeftyMessageEndToEnd(t *testing.T) {
 		}
 
 		for _, msg := range out.Messages {
+			t.Logf("%s: received message", time.Now().String())
+
 			// assert on message attributes
 			assert.Len(t, msg.MessageAttributes, 12, "message attributes length is correct")
 			for _, v := range msg.MessageAttributes {

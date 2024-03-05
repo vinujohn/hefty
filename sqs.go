@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	MaxSqsMessageLengthBytes        = 262_144
-	MaxHeftyMessageLengthBytes      = 26_214_400
+	MaxSqsMessageLengthBytes        = 262_144    // 256KB
+	MaxHeftyMessageLengthBytes      = 33_554_432 // 32MB
 	heftyClientVersionMessageKey    = "hefty-client-version"
 	receiptHandlePrefix             = "hefty-message"
 	expectedReceiptHandleTokenCount = 4
