@@ -9,7 +9,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHeftyMessageEndToEnd(t *testing.T) {
+func TestSendAndReceive(t *testing.T) {
+	t.Cleanup(cleanup)
+
+	setup()
+
+	t.Run("TestHeftyMessageEndToEnd", HeftyMessageEndToEnd)
+	t.Run("TestPunyMessageEndToEnd", PunyMessageEndToEnd)
+}
+
+// sends a message of size 32MB which is the max size for the hefty client
+func HeftyMessageEndToEnd(t *testing.T) {
 	msgTextBody, msgAttributes := getMaxHeftyMsgBodyAndAttr()
 
 	t.Logf("%s: finished creating message", time.Now().String())
@@ -61,7 +71,8 @@ func TestHeftyMessageEndToEnd(t *testing.T) {
 	}
 }
 
-func TestPunyMessageEndToEnd(t *testing.T) {
+// sends a message of size 256KB which is the max size for an sqs message
+func PunyMessageEndToEnd(t *testing.T) {
 	msgTextBody, msgAttributes := getMaxSqsMsgBodyAndAttr()
 
 	_, err := testHeftySqsClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{

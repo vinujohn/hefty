@@ -2,10 +2,7 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"os"
-	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -21,15 +18,6 @@ var (
 	testBucket         string
 	testQueueUrl       string
 )
-
-func TestMain(m *testing.M) {
-	setup()
-	fmt.Println("completed test setup. executing tests")
-	exitCode := m.Run()
-	fmt.Printf("executing cleanup. test exit code: %d\n", exitCode)
-	cleanup()
-	os.Exit(exitCode)
-}
 
 func setup() {
 	// create test clients
