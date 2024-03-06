@@ -1,21 +1,21 @@
-package hefty
+package tests
 
 import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
-	"math/rand"
-	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/vinujohn/hefty"
+	"github.com/vinujohn/hefty/internal/messages"
 )
 
-func getMsg() *largeSqsMsg {
-	msgText256KB := createMessageText(MaxSqsMessageLengthBytes)
-	msgTextBody := createMessageText(MaxHeftyMessageLengthBytes -
-		(MaxSqsMessageLengthBytes * 12) - (len("String") * 12) - (len("test1") * 9) - (len("test10") * 3))
+func getMsg() *messages.LargeSqsMsg {
+	msgText256KB := createMessageText(hefty.MaxSqsMessageLengthBytes)
+	msgTextBody := createMessageText(hefty.MaxHeftyMessageLengthBytes -
+		(hefty.MaxSqsMessageLengthBytes * 12) - (len("String") * 12) - (len("test1") * 9) - (len("test10") * 3))
 
 	msgAttributes := map[string]types.MessageAttributeValue{
 		"test1": {
@@ -68,26 +68,11 @@ func getMsg() *largeSqsMsg {
 		},
 	}
 
-	msg, _ := newLargeSqsMessage(&msgTextBody, msgAttributes)
+	msg, _ := messages.NewLargeSqsMessage(&msgTextBody, msgAttributes)
 	return msg
 }
 
-func createMessageText(numBytes int) string {
-	builder := strings.Builder{}
-
-	// printable characters
-	min := 33
-	max := 126
-
-	for i := 0; i < numBytes; i++ {
-		randNum := rand.Intn(max-min+1) + min
-		builder.WriteByte(byte(randNum))
-	}
-
-	return builder.String()
-}
-
-func gobSerialize(msg *largeSqsMsg) ([]byte, error) {
+func gobSerialize(msg *messages.LargeSqsMsg) ([]byte, error) {
 	var network bytes.Buffer
 	enc := gob.NewEncoder(&network)
 	err := enc.Encode(msg)
@@ -95,10 +80,10 @@ func gobSerialize(msg *largeSqsMsg) ([]byte, error) {
 	return network.Bytes(), err
 }
 
-func gobDeserialize(b []byte) (*largeSqsMsg, error) {
+func gobDeserialize(b []byte) (*messages.LargeSqsMsg, error) {
 	var network bytes.Buffer = *bytes.NewBuffer(b)
 	dec := gob.NewDecoder(&network)
-	var msg largeSqsMsg
+	var msg messages.LargeSqsMsg
 	err := dec.Decode(&msg)
 	return &msg, err
 }
@@ -150,7 +135,7 @@ func BenchmarkDeserialize(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err = deserializeLargeSqsMsg(serial)
+		_, err = messages.DeserializeLargeSqsMsg(serial)
 		if err != nil {
 			b.Fatalf("error encountered during benchmarking. %v", err)
 		}
@@ -167,7 +152,7 @@ func BenchmarkJsonDeserialize(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var msg largeSqsMsg
+		var msg messages.LargeSqsMsg
 		err = json.Unmarshal(j, &msg)
 		if err != nil {
 			b.Fatalf("error encountered during benchmarking. %v", err)

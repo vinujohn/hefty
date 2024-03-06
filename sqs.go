@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
+	"github.com/vinujohn/hefty/internal/messages"
 )
 
 const (
@@ -68,7 +69,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// create large message
-	largeMsg, err := newLargeSqsMessage(params.MessageBody, params.MessageAttributes)
+	largeMsg, err := messages.NewLargeSqsMessage(params.MessageBody, params.MessageAttributes)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create large message. %v", err)
 	}
@@ -87,10 +88,10 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// create md5 digests
-	bodyHash := md5Digest(serialized[bodyOffset:msgAttrOffset])
+	bodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
 	msgAttrHash := ""
 	if len(largeMsg.MessageAttributes) > 0 {
-		msgAttrHash = md5Digest(serialized[msgAttrOffset:])
+		msgAttrHash = messages.Md5Digest(serialized[msgAttrOffset:])
 	}
 
 	// create reference message
@@ -162,7 +163,7 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// deserialize message body
-		var refMsg referenceMsg
+		var refMsg messages.ReferenceMsg
 		err = json.Unmarshal([]byte(*out.Messages[i].Body), &refMsg)
 		if err != nil {
 			return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
@@ -179,7 +180,7 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// decode message from s3
-		largeMsg, err := deserializeLargeSqsMsg(buf.Bytes())
+		largeMsg, err := messages.DeserializeLargeSqsMsg(buf.Bytes())
 		if err != nil {
 			return nil, fmt.Errorf("unable to decode bytes into large message type. %v", err)
 		}
@@ -245,13 +246,13 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 }
 
 // Example queueUrl: https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
-func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attributesHash string) (*referenceMsg, error) {
+func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attributesHash string) (*messages.ReferenceMsg, error) {
 	if queueUrl != nil {
 		tokens := strings.Split(*queueUrl, "/")
 		if len(tokens) != 5 {
 			return nil, fmt.Errorf("expected 5 tokens when splitting queueUrl by '/' but only received %d", len(tokens))
 		} else {
-			return &referenceMsg{
+			return &messages.ReferenceMsg{
 				S3Region:          region,
 				S3Bucket:          bucketName,
 				S3Key:             fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid

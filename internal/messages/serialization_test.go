@@ -1,4 +1,4 @@
-package hefty
+package messages
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
-	msg, _ := newLargeSqsMessage(aws.String("test"), map[string]types.MessageAttributeValue{
+	msg, _ := NewLargeSqsMessage(aws.String("test"), map[string]types.MessageAttributeValue{
 		"test3": {
 			DataType:    aws.String("Binary"),
 			BinaryValue: []byte{1, 2, 3},
@@ -29,13 +29,13 @@ func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
 		t.Fatalf("error when trying to serialize. %v", err)
 	}
 	assert.Len(t, serialized, msg.Size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
-	assert.Equal(t, "098f6bcd4621d373cade4e832627b4f6", md5Digest(serialized[bodyOffset:msgAttrOffset]))
+	assert.Equal(t, "098f6bcd4621d373cade4e832627b4f6", Md5Digest(serialized[bodyOffset:msgAttrOffset]))
 	if len(msg.MessageAttributes) > 0 {
-		assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", md5Digest(serialized[msgAttrOffset:]))
+		assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", Md5Digest(serialized[msgAttrOffset:]))
 	}
 
-	var dMsg *largeSqsMsg
-	if dMsg, err = deserializeLargeSqsMsg(serialized); err != nil {
+	var dMsg *LargeSqsMsg
+	if dMsg, err = DeserializeLargeSqsMsg(serialized); err != nil {
 		t.Fatalf("error from deserialize. %v", err)
 	}
 

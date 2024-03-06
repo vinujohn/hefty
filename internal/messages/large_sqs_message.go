@@ -1,10 +1,8 @@
-package hefty
+package messages
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,18 +11,11 @@ import (
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-type referenceMsg struct {
-	S3Region          string `json:"s3_region"`
-	S3Bucket          string `json:"s3_bucket"`
-	S3Key             string `json:"s3_key"`
-	SqsMd5HashBody    string `json:"sqs_md5_hash_body"`
-	SqsMd5HashMsgAttr string `json:"sqs_md5_hash_msg_attr"`
-}
-
-type largeSqsMsg struct {
+// LargeSqsMsg is an AWS SQS message that is large and needs to be stored in AWS S3
+type LargeSqsMsg struct {
 	Body              *string
 	MessageAttributes map[string]sqsTypes.MessageAttributeValue
-	Size              int
+	Size              int // size of both the body and message attributes
 }
 
 const (
@@ -35,8 +26,8 @@ const (
 	binaryTransportType      byte = 2
 )
 
-func newLargeSqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageAttributeValue) (*largeSqsMsg, error) {
-	msg := &largeSqsMsg{
+func NewLargeSqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageAttributeValue) (*LargeSqsMsg, error) {
+	msg := &LargeSqsMsg{
 		Body:              body,
 		MessageAttributes: msgAttributes,
 	}
@@ -55,7 +46,7 @@ func newLargeSqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageA
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *largeSqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
+func (msg *LargeSqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
 	// create a buffer
 	b := make([]byte, 0, msg.Size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
@@ -187,7 +178,7 @@ func writeNext(buf *bytes.Buffer, data any) error {
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func deserializeLargeSqsMsg(in []byte) (*largeSqsMsg, error) {
+func DeserializeLargeSqsMsg(in []byte) (*LargeSqsMsg, error) {
 	reader := bytes.NewReader(in)
 
 	var data []byte
@@ -250,7 +241,7 @@ func deserializeLargeSqsMsg(in []byte) (*largeSqsMsg, error) {
 		}
 	}
 
-	return newLargeSqsMessage(&body, msgAttr)
+	return NewLargeSqsMessage(&body, msgAttr)
 }
 
 func readNext(reader *bytes.Reader) ([]byte, bool) {
@@ -269,12 +260,7 @@ func readNext(reader *bytes.Reader) ([]byte, bool) {
 	return data, read == int(length)
 }
 
-func md5Digest(buf []byte) string {
-	hash := md5.Sum(buf)
-	return hex.EncodeToString(hash[:])
-}
-
-func msgSize(msg *largeSqsMsg) (int, error) {
+func msgSize(msg *LargeSqsMsg) (int, error) {
 	var size int
 	size += len(*msg.Body)
 

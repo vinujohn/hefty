@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -123,14 +122,4 @@ func cleanup(exitCode *int) {
 	}
 
 	os.Exit(*exitCode)
-}
-
-func createMessageText(numBytes int) string {
-	builder := strings.Builder{}
-
-	for i := 0; i < numBytes; i++ {
-		builder.WriteByte(65) // append letter 'A'
-	}
-
-	return builder.String()
 }
