@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
-	msg, _ := NewLargeSqsMessage(aws.String("test"), map[string]types.MessageAttributeValue{
+func TestHeftyMessageSerializeAndDeserialize(t *testing.T) {
+	msg, _ := NewHeftySqsMessage(aws.String("test"), map[string]types.MessageAttributeValue{
 		"test3": {
 			DataType:    aws.String("Binary"),
 			BinaryValue: []byte{1, 2, 3},
@@ -34,8 +34,8 @@ func TestLargeMessageSerializeAndDeserialize(t *testing.T) {
 		assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", Md5Digest(serialized[msgAttrOffset:]))
 	}
 
-	var dMsg *LargeSqsMsg
-	if dMsg, err = DeserializeLargeSqsMsg(serialized); err != nil {
+	var dMsg *HeftySqsMsg
+	if dMsg, err = DeserializeHeftySqsMsg(serialized); err != nil {
 		t.Fatalf("error from deserialize. %v", err)
 	}
 

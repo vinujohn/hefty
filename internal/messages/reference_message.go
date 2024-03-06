@@ -1,6 +1,6 @@
 package messages
 
-// ReferenceMsg is what is sent to AWS SQS in place of the original large AWS SQS message.
+// ReferenceMsg is what is sent to AWS SQS in place of hefty message stored in AWS S3.
 type ReferenceMsg struct {
 	S3Region          string `json:"s3_region"`
 	S3Bucket          string `json:"s3_bucket"`

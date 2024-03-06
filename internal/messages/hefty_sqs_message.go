@@ -11,8 +11,8 @@ import (
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-// LargeSqsMsg is an AWS SQS message that is large and needs to be stored in AWS S3
-type LargeSqsMsg struct {
+// HeftySqsMsg is an AWS SQS message that is over 256KB and needs to be stored in AWS S3
+type HeftySqsMsg struct {
 	Body              *string
 	MessageAttributes map[string]sqsTypes.MessageAttributeValue
 	Size              int // size of both the body and message attributes
@@ -26,8 +26,8 @@ const (
 	binaryTransportType      byte = 2
 )
 
-func NewLargeSqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageAttributeValue) (*LargeSqsMsg, error) {
-	msg := &LargeSqsMsg{
+func NewHeftySqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageAttributeValue) (*HeftySqsMsg, error) {
+	msg := &HeftySqsMsg{
 		Body:              body,
 		MessageAttributes: msgAttributes,
 	}
@@ -46,7 +46,7 @@ func NewLargeSqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageA
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *LargeSqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
+func (msg *HeftySqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
 	// create a buffer
 	b := make([]byte, 0, msg.Size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
@@ -178,7 +178,7 @@ func writeNext(buf *bytes.Buffer, data any) error {
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func DeserializeLargeSqsMsg(in []byte) (*LargeSqsMsg, error) {
+func DeserializeHeftySqsMsg(in []byte) (*HeftySqsMsg, error) {
 	reader := bytes.NewReader(in)
 
 	var data []byte
@@ -241,7 +241,7 @@ func DeserializeLargeSqsMsg(in []byte) (*LargeSqsMsg, error) {
 		}
 	}
 
-	return NewLargeSqsMessage(&body, msgAttr)
+	return NewHeftySqsMessage(&body, msgAttr)
 }
 
 func readNext(reader *bytes.Reader) ([]byte, bool) {
@@ -260,7 +260,7 @@ func readNext(reader *bytes.Reader) ([]byte, bool) {
 	return data, read == int(length)
 }
 
-func msgSize(msg *LargeSqsMsg) (int, error) {
+func msgSize(msg *HeftySqsMsg) (int, error) {
 	var size int
 	size += len(*msg.Body)
 
