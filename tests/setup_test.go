@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -22,6 +23,15 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	setup()
+	fmt.Println("completed test setup. executing tests")
+	exitCode := m.Run()
+	fmt.Printf("executing cleanup. test exit code: %d\n", exitCode)
+	cleanup()
+	os.Exit(exitCode)
+}
+
+func setup() {
 	// create test clients
 	sdkConfig, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -57,14 +67,9 @@ func TestMain(m *testing.M) {
 		log.Fatalf("could not create queue %s. %v", queueName, err)
 	}
 	testQueueUrl = *q.QueueUrl
-
-	var exitCode *int = new(int)
-	defer cleanup(exitCode)
-
-	*exitCode = m.Run()
 }
 
-func cleanup(exitCode *int) {
+func cleanup() {
 	// delete all remaining objects in test bucket
 	var continueToken *string
 	for {
@@ -120,6 +125,4 @@ func cleanup(exitCode *int) {
 	if err != nil {
 		log.Printf("could not delete queue %s. %v", testQueueUrl, err)
 	}
-
-	os.Exit(*exitCode)
 }
