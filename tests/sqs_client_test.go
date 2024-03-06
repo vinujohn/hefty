@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/stretchr/testify/assert"
+	"github.com/vinujohn/hefty/internal/testutils"
 )
 
 func TestSendAndReceive(t *testing.T) {
@@ -20,7 +21,7 @@ func TestSendAndReceive(t *testing.T) {
 
 // sends a message of size 32MB which is the max size for the hefty client
 func HeftyMessageEndToEnd(t *testing.T) {
-	msgTextBody, msgAttributes := getMaxHeftyMsgBodyAndAttr()
+	msgTextBody, msgAttributes := testutils.GetMaxHeftyMsgBodyAndAttr()
 
 	t.Logf("%s: finished creating message", time.Now().String())
 	_, err := testHeftySqsClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
@@ -73,7 +74,7 @@ func HeftyMessageEndToEnd(t *testing.T) {
 
 // sends a message of size 256KB which is the max size for an sqs message
 func PunyMessageEndToEnd(t *testing.T) {
-	msgTextBody, msgAttributes := getMaxSqsMsgBodyAndAttr()
+	msgTextBody, msgAttributes := testutils.GetMaxSqsMsgBodyAndAttr()
 
 	_, err := testHeftySqsClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
 		MessageBody:       msgTextBody,

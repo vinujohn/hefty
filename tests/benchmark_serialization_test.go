@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vinujohn/hefty/internal/messages"
+	"github.com/vinujohn/hefty/internal/testutils"
 )
 
 func gobSerialize(msg *messages.HeftySqsMsg) ([]byte, error) {
@@ -26,7 +27,7 @@ func gobDeserialize(b []byte) (*messages.HeftySqsMsg, error) {
 }
 
 func BenchmarkSerialize(b *testing.B) {
-	msg := getMaxHeftyMessage()
+	msg := testutils.GetMaxHeftyMsg()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -38,7 +39,7 @@ func BenchmarkSerialize(b *testing.B) {
 }
 
 func BenchmarkJsonSerialize(b *testing.B) {
-	msg := getMaxHeftyMessage()
+	msg := testutils.GetMaxHeftyMsg()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -51,7 +52,7 @@ func BenchmarkJsonSerialize(b *testing.B) {
 }
 
 func BenchmarkGobSerialize(b *testing.B) {
-	msg := getMaxHeftyMessage()
+	msg := testutils.GetMaxHeftyMsg()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -63,7 +64,7 @@ func BenchmarkGobSerialize(b *testing.B) {
 }
 
 func BenchmarkDeserialize(b *testing.B) {
-	msg := getMaxHeftyMessage()
+	msg := testutils.GetMaxHeftyMsg()
 	serial, _, _, err := msg.Serialize()
 	if err != nil {
 		b.Fatalf("error encountered during benchmarking. %v", err)
@@ -80,7 +81,7 @@ func BenchmarkDeserialize(b *testing.B) {
 }
 
 func BenchmarkJsonDeserialize(b *testing.B) {
-	msg := getMaxHeftyMessage()
+	msg := testutils.GetMaxHeftyMsg()
 	j, err := json.Marshal(msg)
 	if err != nil {
 		b.Fatalf("error encountered during benchmarking. %v", err)
@@ -98,7 +99,7 @@ func BenchmarkJsonDeserialize(b *testing.B) {
 }
 
 func BenchmarkGobDeserialize(b *testing.B) {
-	msg := getMaxHeftyMessage()
+	msg := testutils.GetMaxHeftyMsg()
 	buf, err := gobSerialize(msg)
 	if err != nil {
 		b.Fatalf("error encountered during benchmarking. %v", err)

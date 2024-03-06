@@ -1,4 +1,4 @@
-package tests
+package testutils
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"github.com/vinujohn/hefty/internal/messages"
 )
 
-func getMessageBodyAndAttributes(bodySize, numAttributes, attributeValueSize int) (*string, map[string]types.MessageAttributeValue) {
+func GetMsgBodyAndAttrs(bodySize, numAttributes, attributeValueSize int) (*string, map[string]types.MessageAttributeValue) {
 	body := createMessageText(bodySize)
 
 	var msgAttributes map[string]types.MessageAttributeValue
@@ -42,7 +42,21 @@ func getMessageBodyAndAttributes(bodySize, numAttributes, attributeValueSize int
 	return &body, msgAttributes
 }
 
-func getMaxHeftyMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue) {
+func GetMsgBodyAndAttrsRandom() (*string, map[string]types.MessageAttributeValue) {
+	minBodySize := 30
+	minAttrValueSize := 10
+	maxAttrValueSize := 50
+	minNumAttr := 0
+	maxNumAttr := 10
+
+	random := func(min, max int) int {
+		return rand.Intn(max-min+1) + min
+	}
+
+	return GetMsgBodyAndAttrs(random(minBodySize, hefty.MaxSqsMessageLengthBytes*1.5), random(minNumAttr, maxNumAttr), random(minAttrValueSize, maxAttrValueSize))
+}
+
+func GetMaxHeftyMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue) {
 	const numAttributes = 11 // more than the sqs limit of 10
 
 	attrTotalSize := (hefty.MaxSqsMessageLengthBytes +
@@ -51,10 +65,10 @@ func getMaxHeftyMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValu
 
 	bodySize := hefty.MaxHeftyMessageLengthBytes - attrTotalSize
 
-	return getMessageBodyAndAttributes(bodySize, numAttributes, hefty.MaxSqsMessageLengthBytes)
+	return GetMsgBodyAndAttrs(bodySize, numAttributes, hefty.MaxSqsMessageLengthBytes)
 }
 
-func getMaxSqsMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue) {
+func GetMaxSqsMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue) {
 	const numAttributes = 10 // sqs limit
 	const attrValueSizeBytes = 256
 
@@ -64,11 +78,11 @@ func getMaxSqsMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue)
 
 	bodySize := hefty.MaxSqsMessageLengthBytes - attrTotalSize
 
-	return getMessageBodyAndAttributes(bodySize, numAttributes, attrValueSizeBytes)
+	return GetMsgBodyAndAttrs(bodySize, numAttributes, attrValueSizeBytes)
 }
 
-func getMaxHeftyMessage() *messages.HeftySqsMsg {
-	body, attributes := getMaxHeftyMsgBodyAndAttr()
+func GetMaxHeftyMsg() *messages.HeftySqsMsg {
+	body, attributes := GetMaxHeftyMsgBodyAndAttr()
 	msg, _ := messages.NewHeftySqsMessage(body, attributes)
 
 	return msg

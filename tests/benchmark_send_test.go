@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/vinujohn/hefty/internal/testutils"
 )
 
 func BenchmarkSend(b *testing.B) {
@@ -16,7 +17,7 @@ func BenchmarkSend(b *testing.B) {
 	var err error
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		body, attr := getMessageBodyAndAttributesRandom()
+		body, attr := testutils.GetMsgBodyAndAttrsRandom()
 		in := &sqs.SendMessageInput{
 			QueueUrl:          &testQueueUrl,
 			MessageBody:       body,
