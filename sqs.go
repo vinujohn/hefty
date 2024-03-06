@@ -16,6 +16,7 @@ import (
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
+	"github.com/vinujohn/hefty/internal/utils"
 )
 
 const (
@@ -39,7 +40,7 @@ type SqsClientWrapper struct {
 // bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
 func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClientWrapper, error) {
 	// check if bucket exits
-	if ok, err := bucketExists(s3Client, bucketName); !ok {
+	if ok, err := utils.BucketExists(s3Client, bucketName); !ok {
 		if err != nil {
 			return nil, err
 		}

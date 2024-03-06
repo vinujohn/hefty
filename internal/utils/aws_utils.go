@@ -1,4 +1,4 @@
-package hefty
+package utils
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 // bucketExists checks whether a bucket exists in the current account.
 // TODO: we need a better way to check if a bucket exists.  for example if a bucket exists in another account,
 // we won't have access to it.  Needs research
-func bucketExists(s3Client *s3.Client, bucketName string) (bool, error) {
+func BucketExists(s3Client *s3.Client, bucketName string) (bool, error) {
 	_, err := s3Client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
 	})
