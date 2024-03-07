@@ -15,7 +15,7 @@ import (
 var (
 	testHeftySqsClient *hefty.SqsClientWrapper
 	testS3Client       *s3.Client
-	testBucket         string
+	testBucket2        string
 	testQueueUrl       string
 )
 
@@ -29,19 +29,19 @@ func setup() {
 	testS3Client = s3.NewFromConfig(sdkConfig)
 
 	// create test bucket
-	testBucket = "hefty-integration-tests"
+	testBucket2 = "hefty-integration-tests"
 	_, err = testS3Client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
-		Bucket: &testBucket,
+		Bucket: &testBucket2,
 		CreateBucketConfiguration: &s3Types.CreateBucketConfiguration{
 			LocationConstraint: s3Types.BucketLocationConstraintUsWest2,
 		},
 	})
 	if err != nil {
-		log.Fatalf("could not create test bucket %s. %v", testBucket, err)
+		log.Fatalf("could not create test bucket %s. %v", testBucket2, err)
 	}
 
 	// create hefty client
-	testHeftySqsClient, err = hefty.NewSqsClientWrapper(sqsClient, testS3Client, testBucket)
+	testHeftySqsClient, err = hefty.NewSqsClientWrapper(sqsClient, testS3Client, testBucket2)
 	if err != nil {
 		log.Fatalf("could not create hefty client. %v", err)
 	}
@@ -63,11 +63,11 @@ func cleanup() {
 	for {
 		// list out objects to delete
 		listObjects, err := testS3Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
-			Bucket:            &testBucket,
+			Bucket:            &testBucket2,
 			ContinuationToken: continueToken,
 		})
 		if err != nil {
-			log.Fatalf("could not list objects in bucket %s. %v", testBucket, err)
+			log.Fatalf("could not list objects in bucket %s. %v", testBucket2, err)
 		}
 
 		// create list of object keys to delete
@@ -81,13 +81,13 @@ func cleanup() {
 		// delete objects
 		if len(itemsToDelete) > 0 {
 			_, err = testS3Client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
-				Bucket: &testBucket,
+				Bucket: &testBucket2,
 				Delete: &s3Types.Delete{
 					Objects: itemsToDelete,
 				},
 			})
 			if err != nil {
-				log.Fatalf("could not delete objects in test bucket %s. %v", testBucket, err)
+				log.Fatalf("could not delete objects in test bucket %s. %v", testBucket2, err)
 			}
 		}
 
@@ -100,10 +100,10 @@ func cleanup() {
 
 	// delete test bucket
 	_, err := testS3Client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
-		Bucket: &testBucket,
+		Bucket: &testBucket2,
 	})
 	if err != nil {
-		log.Printf("could not delete test bucket %s. %v", testBucket, err)
+		log.Printf("could not delete test bucket %s. %v", testBucket2, err)
 	}
 
 	// delete test queue
