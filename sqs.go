@@ -191,8 +191,8 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		out.Messages[i].MessageAttributes = heftyMsg.MessageAttributes
 
 		// replace md5 hashes
-		out.Messages[i].MD5OfBody = &refMsg.SqsMd5HashBody
-		out.Messages[i].MD5OfMessageAttributes = &refMsg.SqsMd5HashMsgAttr
+		out.Messages[i].MD5OfBody = &refMsg.Md5HashBody
+		out.Messages[i].MD5OfMessageAttributes = &refMsg.Md5HashMsgAttr
 
 		// modify receipt handle to contain s3 bucket and key info
 		newReceiptHandle := fmt.Sprintf("%s|%s|%s|%s", receiptHandlePrefix, *out.Messages[i].ReceiptHandle, refMsg.S3Bucket, refMsg.S3Key)
@@ -255,11 +255,11 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attr
 			return nil, fmt.Errorf("expected 5 tokens when splitting queueUrl by '/' but only received %d", len(tokens))
 		} else {
 			return &messages.ReferenceMsg{
-				S3Region:          region,
-				S3Bucket:          bucketName,
-				S3Key:             fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
-				SqsMd5HashBody:    bodyHash,
-				SqsMd5HashMsgAttr: attributesHash,
+				S3Region:       region,
+				S3Bucket:       bucketName,
+				S3Key:          fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
+				Md5HashBody:    bodyHash,
+				Md5HashMsgAttr: attributesHash,
 			}, nil
 		}
 	}
