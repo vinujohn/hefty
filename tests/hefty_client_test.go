@@ -194,8 +194,7 @@ var _ = Describe("Hefty SQS Client Wrapper", func() {
 
 			It("and since 2 attributes were requested, we get 2 of them", func() {
 				Expect(res.Messages[0].MessageAttributes).Should(HaveLen(2))
-				Expect("test03").Should(BeKeyOf(res.Messages[0].MessageAttributes))
-				Expect("test05").Should(BeKeyOf(res.Messages[0].MessageAttributes))
+				Expect(res.Messages[0].MessageAttributes).Should(HaveKey(MatchRegexp("test0[3|5]$")))
 			})
 		})
 	})
