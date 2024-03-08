@@ -123,6 +123,12 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
 	params.MessageAttributes[heftyClientVersionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 
+	// replace overwritten values with original values
+	defer func() {
+		params.MessageBody = heftyMsg.Body
+		params.MessageAttributes = heftyMsg.MessageAttributes
+	}()
+
 	out, err := client.SendMessage(ctx, params, optFns...)
 	if err != nil {
 		return out, err

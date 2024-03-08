@@ -116,11 +116,12 @@ var _ = SynchronizedAfterSuite(func() {
 	Expect(err).To(BeNil())
 })
 
-var _ = Describe("Hefty SQS Client Wrapper", func() {
+var _ = Describe("Hefty Client Wrapper", func() {
 
 	Describe("When sending a message to AWS SQS with the Hefty client", Ordered, func() {
 		var msg *string
 		var msgAttr map[string]types.MessageAttributeValue
+		var input *sqs.SendMessageInput
 		var res *sqs.ReceiveMessageOutput
 		var queueUrl *string
 		var requestedAttr []string
@@ -145,11 +146,12 @@ var _ = Describe("Hefty SQS Client Wrapper", func() {
 		})
 
 		JustBeforeEach(OncePerOrdered, func() {
-			_, err := heftyClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
+			input = &sqs.SendMessageInput{
 				MessageBody:       msg,
 				MessageAttributes: msgAttr,
 				QueueUrl:          queueUrl,
-			})
+			}
+			_, err := heftyClient.SendHeftyMessage(context.TODO(), input)
 			Expect(err).To(BeNil())
 		})
 
@@ -172,11 +174,16 @@ var _ = Describe("Hefty SQS Client Wrapper", func() {
 				requestedAttr = []string{"test03", "test05"}
 			})
 
-			It("and the message body is the same as what was sent", func() {
+			It("and the message body and message attributes sent is not overwritten", func() {
+				Expect(input.MessageBody).To(Equal(msg))
+				Expect(input.MessageAttributes).To(Equal(msgAttr))
+			})
+
+			It("and the message body received is the same as what was sent", func() {
 				Expect(res.Messages[0].Body).To(Equal(msg))
 			})
 
-			It("and even though 2 attributes were requested, we get all message attributes sent.", func() {
+			It("and even though 2 attributes were requested, we receive all message attributes sent.", func() {
 				Expect(res.Messages[0].MessageAttributes).To(Equal(msgAttr))
 			})
 		})
@@ -188,11 +195,16 @@ var _ = Describe("Hefty SQS Client Wrapper", func() {
 				requestedAttr = []string{"test03", "test05"}
 			})
 
-			It("and the message body is the same as what was sent", func() {
+			It("and the message body and message attributes sent is not overwritten", func() {
+				Expect(input.MessageBody).To(Equal(msg))
+				Expect(input.MessageAttributes).To(Equal(msgAttr))
+			})
+
+			It("and the message body received is the same as what was sent", func() {
 				Expect(res.Messages[0].Body).To(Equal(msg))
 			})
 
-			It("and since 2 attributes were requested, we get 2 of them", func() {
+			It("and since 2 attributes were requested, we receive 2 of them", func() {
 				Expect(res.Messages[0].MessageAttributes).Should(HaveLen(2))
 				Expect(res.Messages[0].MessageAttributes).Should(HaveKey(MatchRegexp("test0[3|5]$")))
 			})
