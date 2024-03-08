@@ -6,24 +6,25 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	snsTypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
+	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/vinujohn/hefty"
 	"github.com/vinujohn/hefty/internal/messages"
 )
 
-func GetMsgBodyAndAttrs(bodySize, numAttributes, attributeValueSize int) (*string, map[string]types.MessageAttributeValue) {
+func GetMsgBodyAndAttrs(bodySize, numAttributes, attributeValueSize int) (*string, map[string]sqsTypes.MessageAttributeValue) {
 	body := createMessageText(bodySize)
 
-	var msgAttributes map[string]types.MessageAttributeValue
+	var msgAttributes map[string]sqsTypes.MessageAttributeValue
 
 	if numAttributes > 0 {
 		numAttributes = min(numAttributes, 99)
 		msgAttributeTypes := []string{"String", "Binary"}
-		msgAttributes = make(map[string]types.MessageAttributeValue)
+		msgAttributes = make(map[string]sqsTypes.MessageAttributeValue)
 		for i := 0; i < numAttributes; i++ {
 			key := "test" + fmt.Sprintf("%02d", i)
 			dataType := msgAttributeTypes[i%len(msgAttributeTypes)]
-			msgAttrVal := types.MessageAttributeValue{
+			msgAttrVal := sqsTypes.MessageAttributeValue{
 				DataType: aws.String(dataType),
 			}
 			switch dataType {
@@ -42,7 +43,7 @@ func GetMsgBodyAndAttrs(bodySize, numAttributes, attributeValueSize int) (*strin
 	return &body, msgAttributes
 }
 
-func GetMsgBodyAndAttrsRandom() (*string, map[string]types.MessageAttributeValue) {
+func GetMsgBodyAndAttrsRandom() (*string, map[string]sqsTypes.MessageAttributeValue) {
 	minBodySize := 30
 	minAttrValueSize := 10
 	maxAttrValueSize := 50
@@ -56,7 +57,7 @@ func GetMsgBodyAndAttrsRandom() (*string, map[string]types.MessageAttributeValue
 	return GetMsgBodyAndAttrs(random(minBodySize, hefty.MaxSqsMessageLengthBytes*1.5), random(minNumAttr, maxNumAttr), random(minAttrValueSize, maxAttrValueSize))
 }
 
-func GetMaxHeftyMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue) {
+func GetMaxHeftyMsgBodyAndAttr() (*string, map[string]sqsTypes.MessageAttributeValue) {
 	const numAttributes = 11 // more than the sqs limit of 10
 
 	attrTotalSize := (hefty.MaxSqsMessageLengthBytes +
@@ -68,7 +69,7 @@ func GetMaxHeftyMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValu
 	return GetMsgBodyAndAttrs(bodySize, numAttributes, hefty.MaxSqsMessageLengthBytes)
 }
 
-func GetMaxSqsMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue) {
+func GetMaxSqsMsgBodyAndAttr() (*string, map[string]sqsTypes.MessageAttributeValue) {
 	const numAttributes = 10 // sqs limit
 	const attrValueSizeBytes = 256
 
@@ -79,6 +80,30 @@ func GetMaxSqsMsgBodyAndAttr() (*string, map[string]types.MessageAttributeValue)
 	bodySize := hefty.MaxSqsMessageLengthBytes - attrTotalSize
 
 	return GetMsgBodyAndAttrs(bodySize, numAttributes, attrValueSizeBytes)
+}
+
+func GetMaxSnsMsgBodyAndAttr() (*string, map[string]snsTypes.MessageAttributeValue) {
+	const numAttributes = 10 // sns limit
+	const attrValueSizeBytes = 256
+
+	attrTotalSize := (attrValueSizeBytes +
+		len("String") + // covers both "String" and "Binary"
+		len("test01")) * numAttributes
+
+	bodySize := hefty.MaxSqsMessageLengthBytes - attrTotalSize
+
+	msgAttr := make(map[string]snsTypes.MessageAttributeValue)
+	msgBody, sqsMsgAttr := GetMsgBodyAndAttrs(bodySize, numAttributes, attrValueSizeBytes)
+	for k, v := range sqsMsgAttr {
+		val := snsTypes.MessageAttributeValue{
+			DataType:    v.DataType,
+			BinaryValue: v.BinaryValue,
+			StringValue: v.StringValue,
+		}
+		msgAttr[k] = val
+	}
+
+	return msgBody, msgAttr
 }
 
 func GetMaxHeftyMsg() *messages.HeftySqsMsg {
