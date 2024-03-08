@@ -121,7 +121,6 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 
 	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
-	// TODO: should we replace message attributes with the older attributes
 	params.MessageAttributes = make(map[string]snsTypes.MessageAttributeValue)
 	params.MessageAttributes[heftyClientVersionMessageKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 
