@@ -16,12 +16,6 @@ import (
 	"github.com/vinujohn/hefty/internal/testutils"
 )
 
-type testResult struct {
-	QueueUrl      *string
-	SendMsgResult *sqs.SendMessageOutput
-	ReceivedMsg   *types.Message
-}
-
 var (
 	heftyClient *hefty.SqsClientWrapper
 	sqsClient   *sqs.Client
@@ -122,89 +116,86 @@ var _ = SynchronizedAfterSuite(func() {
 	Expect(err).To(BeNil())
 })
 
-func sendSqsMsgViaHefty(msg *string, msgAttr map[string]types.MessageAttributeValue, msgAttrRequested ...string) <-chan testResult {
-	queueName := uuid.NewString()
-	q, err := heftyClient.CreateQueue(context.TODO(), &sqs.CreateQueueInput{
-		QueueName: &queueName,
-	})
-	if err != nil {
-		panic(err)
-	}
-	testQueues = append(testQueues, q.QueueUrl)
-
-	out, err := heftyClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
-		MessageBody:       msg,
-		MessageAttributes: msgAttr,
-		QueueUrl:          q.QueueUrl,
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	ret := make(chan testResult)
-	go receiveSqsMsgViaHefty(testResult{
-		QueueUrl:      q.QueueUrl,
-		SendMsgResult: out,
-	}, ret, msgAttrRequested...)
-
-	return ret
-}
-
-func receiveSqsMsgViaHefty(result testResult, ret chan<- testResult, msgAttrRequested ...string) {
-	out, err := heftyClient.ReceiveHeftyMessage(context.TODO(), &sqs.ReceiveMessageInput{
-		QueueUrl:              result.QueueUrl,
-		WaitTimeSeconds:       20,
-		MessageAttributeNames: msgAttrRequested,
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	if len(out.Messages) > 0 {
-		result.ReceivedMsg = &out.Messages[0]
-	} else {
-		panic("did not receive messages in 20 seconds")
-	}
-
-	ret <- result
-}
-
 var _ = Describe("Hefty SQS Client Wrapper", func() {
 
-	Describe("When sending a message to AWS SQS with the Hefty client", func() {
+	Describe("When sending a message to AWS SQS with the Hefty client", Ordered, func() {
 		var msg *string
 		var msgAttr map[string]types.MessageAttributeValue
-		var res testResult
+		var res *sqs.ReceiveMessageOutput
+		var queueUrl *string
+		var requestedAttr []string
 
-		Context("and the message is at but not over the Hefty message size limit", func() {
-			BeforeEach(func() {
+		BeforeAll(func() {
+			// create queue
+			queueName := uuid.NewString()
+			q, err := heftyClient.CreateQueue(context.TODO(), &sqs.CreateQueueInput{
+				QueueName: &queueName,
+			})
+			Expect(err).To(BeNil())
+			queueUrl = q.QueueUrl
+			testQueues = append(testQueues, queueUrl) // for cleanup later
+		})
+
+		AfterAll(func() {
+			_, err := heftyClient.DeleteHeftyMessage(context.TODO(), &sqs.DeleteMessageInput{
+				QueueUrl:      queueUrl,
+				ReceiptHandle: res.Messages[0].ReceiptHandle,
+			})
+			Expect(err).To(BeNil())
+		})
+
+		JustBeforeEach(OncePerOrdered, func() {
+			_, err := heftyClient.SendHeftyMessage(context.TODO(), &sqs.SendMessageInput{
+				MessageBody:       msg,
+				MessageAttributes: msgAttr,
+				QueueUrl:          queueUrl,
+			})
+			Expect(err).To(BeNil())
+		})
+
+		JustBeforeEach(OncePerOrdered, func() {
+			var err error
+			res, err = heftyClient.ReceiveHeftyMessage(context.TODO(), &sqs.ReceiveMessageInput{
+				QueueUrl:              queueUrl,
+				WaitTimeSeconds:       20,
+				MessageAttributeNames: requestedAttr,
+			})
+			Expect(err).To(BeNil())
+			Expect(res).NotTo(BeNil())
+			Expect(res.Messages).NotTo(BeEmpty())
+		})
+
+		Context("and the message is at, but not over the Hefty message size limit", Ordered, func() {
+			BeforeAll(func() {
+				// create message body and attributes
 				msg, msgAttr = testutils.GetMaxHeftyMsgBodyAndAttr()
-				res = <-sendSqsMsgViaHefty(msg, msgAttr, "test03", "test05")
+				requestedAttr = []string{"test03", "test05"}
 			})
 
-			It("message body and message attributes are the same as what was sent", func() {
-				Expect(res.ReceivedMsg.Body).To(Equal(msg))
-				Expect(res.ReceivedMsg.MessageAttributes).To(Equal(msgAttr))
+			It("and the message body is the same as what was sent", func() {
+				Expect(res.Messages[0].Body).To(Equal(msg))
 			})
 
-			It("and even though 2 attributes were requested, we get all of them.", func() {
-				Expect(res.ReceivedMsg.MessageAttributes).To(BeNumerically(">", 2))
+			It("and even though 2 attributes were requested, we get all message attributes sent.", func() {
+				Expect(res.Messages[0].MessageAttributes).To(Equal(msgAttr))
 			})
 		})
 
-		Context("and the message is at but not over the AWS SQS size limit", func() {
-			BeforeEach(func() {
+		Context("and the message is at but not over the AWS SQS size limit", Ordered, func() {
+			BeforeAll(func() {
+				// create message body and attributes
 				msg, msgAttr = testutils.GetMaxSqsMsgBodyAndAttr()
-				res = <-sendSqsMsgViaHefty(msg, msgAttr, "test03", "test05")
+				requestedAttr = []string{"test03", "test05"}
 			})
 
-			It("message body and message attributes are the same as what was sent", func() {
-				Expect(res.ReceivedMsg.Body).To(Equal(msg))
-				Expect(res.ReceivedMsg.MessageAttributes).To(ConsistOf("test03", "test05"))
+			It("and the message body is the same as what was sent", func() {
+				Expect(res.Messages[0].Body).To(Equal(msg))
 			})
 
 			It("and since 2 attributes were requested, we get 2 of them", func() {
-				Expect(res.ReceivedMsg.MessageAttributes).To(BeNumerically("==", 2))
+				Expect(res.Messages[0].MessageAttributes).Should(HaveLen(2))
+				Expect("test03").Should(BeKeyOf(res.Messages[0].MessageAttributes))
+				Expect("test05").Should(BeKeyOf(res.Messages[0].MessageAttributes))
 			})
 		})
 	})
