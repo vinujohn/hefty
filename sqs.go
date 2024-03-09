@@ -93,14 +93,14 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// create md5 digests
-	bodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
+	msgBodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
 	msgAttrHash := ""
 	if len(heftyMsg.MessageAttributes) > 0 {
 		msgAttrHash = messages.Md5Digest(serialized[msgAttrOffset:])
 	}
 
 	// create reference message
-	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, msgAttrHash)
+	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, msgBodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 	}
@@ -140,7 +140,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// overwrite md5 values
-	out.MD5OfMessageBody = aws.String(bodyHash)
+	out.MD5OfMessageBody = aws.String(msgBodyHash)
 	out.MD5OfMessageAttributes = aws.String(msgAttrHash)
 
 	return out, err
@@ -203,7 +203,7 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		out.Messages[i].MessageAttributes = sqsAttributes
 
 		// replace md5 hashes
-		out.Messages[i].MD5OfBody = &refMsg.Md5HashBody
+		out.Messages[i].MD5OfBody = &refMsg.Md5HashMsgBody
 		out.Messages[i].MD5OfMessageAttributes = &refMsg.Md5HashMsgAttr
 
 		// modify receipt handle to contain s3 bucket and key info
@@ -260,7 +260,7 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 }
 
 // Example queueUrl: https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
-func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attributesHash string) (*messages.ReferenceMsg, error) {
+func newSqsReferenceMessage(queueUrl *string, bucketName, region, msgBodyHash, msgAttrHash string) (*messages.ReferenceMsg, error) {
 	const expectedTokenCount = 5
 
 	if queueUrl != nil {
@@ -272,8 +272,8 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attr
 				S3Region:       region,
 				S3Bucket:       bucketName,
 				S3Key:          fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
-				Md5HashBody:    bodyHash,
-				Md5HashMsgAttr: attributesHash,
+				Md5HashMsgBody: msgBodyHash,
+				Md5HashMsgAttr: msgAttrHash,
 			}, nil
 		}
 	}

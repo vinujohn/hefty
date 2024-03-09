@@ -92,7 +92,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// create md5 digests
-	bodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
+	msgBodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
 	msgAttrHash := ""
 	if len(heftyMsg.MessageAttributes) > 0 {
 		msgAttrHash = messages.Md5Digest(serialized[msgAttrOffset:])
@@ -100,7 +100,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 
 	// create reference message
 	// TODO: test with topicArn vs targetArn and notice the difference
-	refMsg, err := newSnsReferenceMessage(params.TopicArn, client.bucket, client.Options().Region, bodyHash, msgAttrHash)
+	refMsg, err := newSnsReferenceMessage(params.TopicArn, client.bucket, client.Options().Region, msgBodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from topicArn. %v", err)
 	}
@@ -143,7 +143,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 }
 
 // Example topicArn: arn:aws:sns:us-west-2:765908583888:MyTopic
-func newSnsReferenceMessage(topicArn *string, bucketName, region, bodyHash, attributesHash string) (*messages.ReferenceMsg, error) {
+func newSnsReferenceMessage(topicArn *string, bucketName, region, msgBodyHash, msgAttrHash string) (*messages.ReferenceMsg, error) {
 	const expectedTokenCount = 6
 
 	if topicArn != nil {
@@ -155,8 +155,8 @@ func newSnsReferenceMessage(topicArn *string, bucketName, region, bodyHash, attr
 				S3Region:       region,
 				S3Bucket:       bucketName,
 				S3Key:          fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: topicArn/uuid
-				Md5HashBody:    bodyHash,
-				Md5HashMsgAttr: attributesHash,
+				Md5HashMsgBody: msgBodyHash,
+				Md5HashMsgAttr: msgAttrHash,
 			}, nil
 		}
 	}
