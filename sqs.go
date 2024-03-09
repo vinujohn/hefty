@@ -69,21 +69,24 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 		return client.SendMessage(ctx, params, optFns...)
 	}
 
-	// create hefty message
+	// normalize message attributes
 	msgAttributes := messages.MapFromSqsMessageAttributeValues(params.MessageAttributes)
-	heftyMsg, err := messages.NewHeftyMessage(params.MessageBody, msgAttributes)
+
+	// calculate message size
+	msgSize, err := messages.MessageSize(params.MessageBody, msgAttributes)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create hefty message. %v", err)
+		return nil, fmt.Errorf("unable to get size of message. %v", err)
 	}
 
 	// validate message size
-	if heftyMsg.Size <= MaxSqsMessageLengthBytes {
+	if msgSize <= MaxSqsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
-	} else if heftyMsg.Size > MaxHeftyMessageLengthBytes {
-		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", heftyMsg.Size, MaxHeftyMessageLengthBytes)
+	} else if msgSize > MaxHeftyMessageLengthBytes {
+		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
 	}
 
-	// serialize hefty message
+	// create and serialize hefty message
+	heftyMsg := messages.NewHeftyMessage(params.MessageBody, msgAttributes, msgSize)
 	serialized, bodyOffset, msgAttrOffset, err := heftyMsg.Serialize()
 	if err != nil {
 		return nil, fmt.Errorf("unable to serialize message. %v", err)

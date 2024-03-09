@@ -8,7 +8,8 @@ import (
 )
 
 func TestHeftyMessageSerializeAndDeserialize(t *testing.T) {
-	msg, _ := NewHeftyMessage(aws.String("test"), map[string]MessageAttributeValue{
+	msg := aws.String("test")
+	attributes := map[string]MessageAttributeValue{
 		"test3": {
 			DataType:    aws.String("Binary"),
 			BinaryValue: []byte{1, 2, 3},
@@ -21,15 +22,17 @@ func TestHeftyMessageSerializeAndDeserialize(t *testing.T) {
 			DataType:    aws.String("Number"),
 			StringValue: aws.String("123"),
 		},
-	})
+	}
+	msgSize, _ := MessageSize(msg, attributes)
+	heftyMsg := NewHeftyMessage(msg, attributes, msgSize)
 
-	serialized, bodyOffset, msgAttrOffset, err := msg.Serialize()
+	serialized, bodyOffset, msgAttrOffset, err := heftyMsg.Serialize()
 	if err != nil {
 		t.Fatalf("error when trying to serialize. %v", err)
 	}
-	assert.Len(t, serialized, msg.Size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
+	assert.Len(t, serialized, heftyMsg.Size+lengthSize+(len(heftyMsg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	assert.Equal(t, "098f6bcd4621d373cade4e832627b4f6", Md5Digest(serialized[bodyOffset:msgAttrOffset]))
-	if len(msg.MessageAttributes) > 0 {
+	if len(heftyMsg.MessageAttributes) > 0 {
 		assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", Md5Digest(serialized[msgAttrOffset:]))
 	}
 
@@ -38,5 +41,5 @@ func TestHeftyMessageSerializeAndDeserialize(t *testing.T) {
 		t.Fatalf("error from deserialize. %v", err)
 	}
 
-	assert.Equal(t, msg, dMsg)
+	assert.Equal(t, heftyMsg, dMsg)
 }

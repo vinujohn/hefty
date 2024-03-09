@@ -106,7 +106,8 @@ func GetMaxSnsMsgBodyAndAttr() (*string, map[string]messages.MessageAttributeVal
 
 func GetMaxHeftyMsg() *messages.HeftyMessage {
 	body, attributes := GetMaxHeftyMsgBodyAndAttr()
-	msg, _ := messages.NewHeftyMessage(body, attributes)
+	msgSize, _ := messages.MessageSize(body, attributes)
+	msg := messages.NewHeftyMessage(body, attributes, msgSize)
 
 	return msg
 }

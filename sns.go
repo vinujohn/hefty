@@ -69,21 +69,24 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 		return client.Publish(ctx, params, optFns...)
 	}
 
-	// create hefty message
-	msgAttr := messages.MapFromSnsMessageAttributeValues(params.MessageAttributes)
-	heftyMsg, err := messages.NewHeftyMessage(params.Message, msgAttr)
+	// normalize message attributes
+	msgAttributes := messages.MapFromSnsMessageAttributeValues(params.MessageAttributes)
+
+	// calculate message size
+	msgSize, err := messages.MessageSize(params.Message, msgAttributes)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create hefty message. %v", err)
+		return nil, fmt.Errorf("unable to get size of message. %v", err)
 	}
 
 	// validate message size
-	if heftyMsg.Size <= MaxSnsMessageLengthBytes {
+	if msgSize <= MaxSnsMessageLengthBytes {
 		return client.Publish(ctx, params, optFns...)
-	} else if heftyMsg.Size > MaxHeftyMessageLengthBytes {
-		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", heftyMsg.Size, MaxHeftyMessageLengthBytes)
+	} else if msgSize > MaxHeftyMessageLengthBytes {
+		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
 	}
 
-	// serialize hefty message
+	// create and serialize hefty message
+	heftyMsg := messages.NewHeftyMessage(params.Message, msgAttributes, msgSize)
 	serialized, bodyOffset, msgAttrOffset, err := heftyMsg.Serialize()
 	if err != nil {
 		return nil, fmt.Errorf("unable to serialize message. %v", err)

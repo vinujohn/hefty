@@ -12,7 +12,7 @@ import (
 type HeftyMessage struct {
 	Body              *string
 	MessageAttributes map[string]MessageAttributeValue
-	Size              int // size of both the body and message attributes
+	Size              int
 }
 
 const (
@@ -23,19 +23,14 @@ const (
 	binaryTransportType      byte = 2
 )
 
-func NewHeftyMessage(body *string, msgAttributes map[string]MessageAttributeValue) (*HeftyMessage, error) {
+func NewHeftyMessage(body *string, msgAttributes map[string]MessageAttributeValue, msgSize int) *HeftyMessage {
 	msg := &HeftyMessage{
 		Body:              body,
 		MessageAttributes: msgAttributes,
+		Size:              msgSize,
 	}
 
-	var err error
-	msg.Size, err = MessageSize(msg.Body, msg.MessageAttributes)
-	if err != nil {
-		return nil, fmt.Errorf("unable to calculate message size. %v", err)
-	}
-
-	return msg, nil
+	return msg
 }
 
 /*
@@ -238,7 +233,12 @@ func DeserializeHeftyMessage(in []byte) (*HeftyMessage, error) {
 		}
 	}
 
-	return NewHeftyMessage(&body, msgAttr)
+	msgSize, err := MessageSize(&body, msgAttr)
+	if err != nil {
+		return nil, fmt.Errorf("unable to calculate message size during deserialization. %v", err)
+	}
+
+	return NewHeftyMessage(&body, msgAttr, msgSize), nil
 }
 
 func readNext(reader *bytes.Reader) ([]byte, bool) {
