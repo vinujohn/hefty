@@ -70,7 +70,8 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// create hefty message
-	heftyMsg, err := messages.NewHeftySnsMessage(params.Message, params.MessageAttributes)
+	msgAttr := messages.MapFromSnsMessageAttributeValues(params.MessageAttributes)
+	heftyMsg, err := messages.NewHeftyMessage(params.Message, msgAttr)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create hefty message. %v", err)
 	}
@@ -127,7 +128,8 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	// replace overwritten values with original values
 	defer func() {
 		params.Message = heftyMsg.Body
-		params.MessageAttributes = heftyMsg.MessageAttributes
+		snsMsgAttr := messages.MapToSnsMessageAttributeValues(heftyMsg.MessageAttributes)
+		params.MessageAttributes = snsMsgAttr
 	}()
 
 	out, err := client.Publish(ctx, params, optFns...)

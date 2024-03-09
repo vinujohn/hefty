@@ -1,6 +1,8 @@
 package messages
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -25,4 +27,9 @@ func MessageSize(msg *string, msgAttr map[string]MessageAttributeValue) (int, er
 	}
 
 	return size, nil
+}
+
+func Md5Digest(buf []byte) string {
+	hash := md5.Sum(buf)
+	return hex.EncodeToString(hash[:])
 }
