@@ -16,6 +16,19 @@ import (
 	"github.com/vinujohn/hefty/internal/testutils"
 )
 
+/*
+March 8, 2024 7:30pm
+go test -bench=BenchmarkSend -benchtime 1m -run BenchmarkSend
+goos: linux
+goarch: amd64
+pkg: github.com/vinujohn/hefty/tests
+cpu: Intel(R) Core(TM) i7-3770K CPU @ 3.50GHz
+BenchmarkSend
+BenchmarkSend-8              498         145469814 ns/op
+PASS
+ok      github.com/vinujohn/hefty/tests 97.631s
+*/
+
 func BenchmarkSend(b *testing.B) {
 	const bucket = "hefty-benchmark-tests"
 
