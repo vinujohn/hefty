@@ -91,7 +91,6 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// create reference message
-	// TODO: test with topicArn vs targetArn and notice the difference
 	refMsg, err := newSnsReferenceMessage(params.TopicArn, client.bucket, client.Options().Region, msgBodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from topicArn. %v", err)
@@ -114,10 +113,9 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 	params.Message = aws.String(string(jsonRefMsg))
 
-	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
 	params.MessageAttributes = make(map[string]snsTypes.MessageAttributeValue)
-	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
 
 	// replace overwritten values with original values
 	defer func() {

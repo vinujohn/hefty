@@ -118,10 +118,9 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 	params.MessageBody = aws.String(string(jsonRefMsg))
 
-	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
 	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
 
 	// replace overwritten values with original values
 	defer func() {
