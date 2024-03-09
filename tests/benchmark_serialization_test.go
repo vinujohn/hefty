@@ -10,7 +10,7 @@ import (
 	"github.com/vinujohn/hefty/internal/testutils"
 )
 
-func gobSerialize(msg *messages.HeftySqsMsg) ([]byte, error) {
+func gobSerialize(msg *messages.HeftyMessage) ([]byte, error) {
 	var network bytes.Buffer
 	enc := gob.NewEncoder(&network)
 	err := enc.Encode(msg)
@@ -18,10 +18,10 @@ func gobSerialize(msg *messages.HeftySqsMsg) ([]byte, error) {
 	return network.Bytes(), err
 }
 
-func gobDeserialize(b []byte) (*messages.HeftySqsMsg, error) {
+func gobDeserialize(b []byte) (*messages.HeftyMessage, error) {
 	var network bytes.Buffer = *bytes.NewBuffer(b)
 	dec := gob.NewDecoder(&network)
-	var msg messages.HeftySqsMsg
+	var msg messages.HeftyMessage
 	err := dec.Decode(&msg)
 	return &msg, err
 }
@@ -73,7 +73,7 @@ func BenchmarkDeserialize(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err = messages.DeserializeHeftySqsMsg(serial)
+		_, err = messages.DeserializeHeftyMessage(serial)
 		if err != nil {
 			b.Fatalf("error encountered during benchmarking. %v", err)
 		}
@@ -90,7 +90,7 @@ func BenchmarkJsonDeserialize(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var msg messages.HeftySqsMsg
+		var msg messages.HeftyMessage
 		err = json.Unmarshal(j, &msg)
 		if err != nil {
 			b.Fatalf("error encountered during benchmarking. %v", err)

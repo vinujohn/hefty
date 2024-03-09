@@ -4,12 +4,11 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHeftyMessageSerializeAndDeserialize(t *testing.T) {
-	msg, _ := NewHeftySqsMessage(aws.String("test"), map[string]types.MessageAttributeValue{
+	msg, _ := NewHeftyMessage(aws.String("test"), map[string]MessageAttributeValue{
 		"test3": {
 			DataType:    aws.String("Binary"),
 			BinaryValue: []byte{1, 2, 3},
@@ -34,8 +33,8 @@ func TestHeftyMessageSerializeAndDeserialize(t *testing.T) {
 		assert.Equal(t, "ae83a9fd2e99604a8073446145c4c523", Md5Digest(serialized[msgAttrOffset:]))
 	}
 
-	var dMsg *HeftySqsMsg
-	if dMsg, err = DeserializeHeftySqsMsg(serialized); err != nil {
+	var dMsg *HeftyMessage
+	if dMsg, err = DeserializeHeftyMessage(serialized); err != nil {
 		t.Fatalf("error from deserialize. %v", err)
 	}
 

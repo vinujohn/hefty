@@ -70,7 +70,8 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// create hefty message
-	heftyMsg, err := messages.NewHeftySqsMessage(params.MessageBody, params.MessageAttributes)
+	msgAttributes := messages.MapFromSqsMessageAttributeValues(params.MessageAttributes)
+	heftyMsg, err := messages.NewHeftyMessage(params.MessageBody, msgAttributes)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create hefty message. %v", err)
 	}
@@ -126,7 +127,8 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	// replace overwritten values with original values
 	defer func() {
 		params.MessageBody = heftyMsg.Body
-		params.MessageAttributes = heftyMsg.MessageAttributes
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(heftyMsg.MessageAttributes)
+		params.MessageAttributes = sqsAttributes
 	}()
 
 	out, err := client.SendMessage(ctx, params, optFns...)
@@ -187,14 +189,15 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// decode message from s3
-		heftyMsg, err := messages.DeserializeHeftySqsMsg(buf.Bytes())
+		heftyMsg, err := messages.DeserializeHeftyMessage(buf.Bytes())
 		if err != nil {
 			return nil, fmt.Errorf("unable to decode bytes into hefty message type. %v", err)
 		}
 
 		// replace message body and attributes with s3 message
 		out.Messages[i].Body = heftyMsg.Body
-		out.Messages[i].MessageAttributes = heftyMsg.MessageAttributes
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(heftyMsg.MessageAttributes)
+		out.Messages[i].MessageAttributes = sqsAttributes
 
 		// replace md5 hashes
 		out.Messages[i].MD5OfBody = &refMsg.Md5HashBody

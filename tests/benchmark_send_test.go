@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty"
+	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/testutils"
 )
 
@@ -30,10 +31,11 @@ func BenchmarkSend(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		body, attr := testutils.GetMsgBodyAndAttrsRandom()
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(attr)
 		in := &sqs.SendMessageInput{
 			QueueUrl:          &queueUrl,
 			MessageBody:       body,
-			MessageAttributes: attr,
+			MessageAttributes: sqsAttributes,
 		}
 		fmt.Printf("body size:%d, num message attributes:%d\n", len(*body), len(attr))
 		b.StartTimer()

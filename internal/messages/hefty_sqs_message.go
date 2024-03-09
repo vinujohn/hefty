@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-// HeftySqsMsg is an AWS SQS message that is over 256KB and needs to be stored in AWS S3
-type HeftySqsMsg struct {
+// HeftyMessage is an AWS SQS or AWS SNS message that is over 256KB and needs to be stored in AWS S3
+type HeftyMessage struct {
 	Body              *string
-	MessageAttributes map[string]sqsTypes.MessageAttributeValue
+	MessageAttributes map[string]MessageAttributeValue
 	Size              int // size of both the body and message attributes
 }
 
@@ -26,14 +23,14 @@ const (
 	binaryTransportType      byte = 2
 )
 
-func NewHeftySqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageAttributeValue) (*HeftySqsMsg, error) {
-	msg := &HeftySqsMsg{
+func NewHeftyMessage(body *string, msgAttributes map[string]MessageAttributeValue) (*HeftyMessage, error) {
+	msg := &HeftyMessage{
 		Body:              body,
 		MessageAttributes: msgAttributes,
 	}
 
 	var err error
-	msg.Size, err = msgSize(msg)
+	msg.Size, err = MessageSize(msg.Body, msg.MessageAttributes)
 	if err != nil {
 		return nil, fmt.Errorf("unable to calculate message size. %v", err)
 	}
@@ -46,7 +43,7 @@ func NewHeftySqsMessage(body *string, msgAttributes map[string]sqsTypes.MessageA
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func (msg *HeftySqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
+func (msg *HeftyMessage) Serialize() (serialized []byte, bodyOffset int, msgAttrOffset int, err error) {
 	// create a buffer
 	b := make([]byte, 0, msg.Size+lengthSize+(len(msg.MessageAttributes)*(numLengthSizesPerMsgAttr*lengthSize+transportTypeSize)))
 	buf := bytes.NewBuffer(b)
@@ -65,7 +62,7 @@ func (msg *HeftySqsMsg) Serialize() (serialized []byte, bodyOffset int, msgAttrO
 	if msg.MessageAttributes != nil && len(msg.MessageAttributes) > 0 {
 		type keyValue struct {
 			key   string
-			value sqsTypes.MessageAttributeValue
+			value MessageAttributeValue
 		}
 		// sort slice of map keys and values as per aws requirements
 		// for calculating md5 digest
@@ -178,7 +175,7 @@ func writeNext(buf *bytes.Buffer, data any) error {
 |4Bytes|	|4Bytes|			  |4Bytes|					|1Byte					 |4Bytes|				|
 |---once----|-----------------------------------------zero or more------------------------------------------|
 */
-func DeserializeHeftySqsMsg(in []byte) (*HeftySqsMsg, error) {
+func DeserializeHeftyMessage(in []byte) (*HeftyMessage, error) {
 	reader := bytes.NewReader(in)
 
 	var data []byte
@@ -193,9 +190,9 @@ func DeserializeHeftySqsMsg(in []byte) (*HeftySqsMsg, error) {
 	}
 
 	// create message attributes
-	var msgAttr map[string]sqsTypes.MessageAttributeValue
+	var msgAttr map[string]MessageAttributeValue
 	if reader.Len() > 0 {
-		msgAttr = make(map[string]sqsTypes.MessageAttributeValue)
+		msgAttr = make(map[string]MessageAttributeValue)
 	}
 
 	for reader.Len() > 0 {
@@ -229,19 +226,19 @@ func DeserializeHeftySqsMsg(in []byte) (*HeftySqsMsg, error) {
 		// construct message attribute
 		if attrTransportType == stringTransportType {
 			strValue := string(data)
-			msgAttr[attrName] = sqsTypes.MessageAttributeValue{
+			msgAttr[attrName] = MessageAttributeValue{
 				DataType:    &attrDataType,
 				StringValue: &strValue,
 			}
 		} else if attrTransportType == binaryTransportType {
-			msgAttr[attrName] = sqsTypes.MessageAttributeValue{
+			msgAttr[attrName] = MessageAttributeValue{
 				DataType:    &attrDataType,
 				BinaryValue: data,
 			}
 		}
 	}
 
-	return NewHeftySqsMessage(&body, msgAttr)
+	return NewHeftyMessage(&body, msgAttr)
 }
 
 func readNext(reader *bytes.Reader) ([]byte, bool) {
@@ -258,26 +255,4 @@ func readNext(reader *bytes.Reader) ([]byte, bool) {
 	}
 
 	return data, read == int(length)
-}
-
-func msgSize(msg *HeftySqsMsg) (int, error) {
-	var size int
-	size += len(*msg.Body)
-
-	if msg.MessageAttributes != nil {
-		for k, v := range msg.MessageAttributes {
-			dataType := aws.ToString(v.DataType)
-			size += len(k)
-			size += len(dataType)
-			if strings.HasPrefix(dataType, "String") || strings.HasPrefix(dataType, "Number") {
-				size += len(aws.ToString(v.StringValue))
-			} else if strings.HasPrefix(dataType, "Binary") {
-				size += len(v.BinaryValue)
-			} else {
-				return -1, fmt.Errorf("encountered unexpected data type for message attribute: %s", dataType)
-			}
-		}
-	}
-
-	return size, nil
 }
