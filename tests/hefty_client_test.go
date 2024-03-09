@@ -238,6 +238,7 @@ var _ = Describe("Hefty Client Wrapper", func() {
 	Describe("When sending a message to AWS SNS with the Hefty client", Ordered, func() {
 		var msg *string
 		var snsMsgAttr map[string]snsTypes.MessageAttributeValue
+		var sqsMsgAttr map[string]sqsTypes.MessageAttributeValue
 		var queueUrl *string
 		var topicArn *string
 		var input *sns.PublishInput
@@ -345,7 +346,31 @@ var _ = Describe("Hefty Client Wrapper", func() {
 			Expect(res.Messages).NotTo(BeEmpty())
 		})
 
-		Context("and the message is at but not over the AWS SQS size limit", Ordered, func() {
+		Context("and the message is at, but not over the Hefty message size limit", Ordered, func() {
+			BeforeAll(func() {
+				// create message body and attributes
+				var msgAttr map[string]messages.MessageAttributeValue
+				msg, msgAttr = testutils.GetMaxHeftyMsgBodyAndAttr()
+				snsMsgAttr = messages.MapToSnsMessageAttributeValues(msgAttr)
+				sqsMsgAttr = messages.MapToSqsMessageAttributeValues(msgAttr)
+				requestedAttr = []string{"test03", "test05"}
+			})
+
+			It("and the message body and message attributes sent is not overwritten", func() {
+				Expect(input.Message).To(Equal(msg))
+				Expect(input.MessageAttributes).To(Equal(snsMsgAttr))
+			})
+
+			It("and the message body received is the same as what was sent", func() {
+				Expect(res.Messages[0].Body).To(Equal(msg))
+			})
+
+			It("and even though 2 attributes were requested, we receive all message attributes sent.", func() {
+				Expect(res.Messages[0].MessageAttributes).To(Equal(sqsMsgAttr))
+			})
+		})
+
+		Context("and the message is at but not over the AWS SNS size limit", Ordered, func() {
 			BeforeAll(func() {
 				// create message body and attributes
 				var msgAttr map[string]messages.MessageAttributeValue

@@ -142,10 +142,12 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 
 // Example topicArn: arn:aws:sns:us-west-2:765908583888:MyTopic
 func newSnsReferenceMessage(topicArn *string, bucketName, region, bodyHash, attributesHash string) (*messages.ReferenceMsg, error) {
+	const expectedTokenCount = 6
+
 	if topicArn != nil {
 		tokens := strings.Split(*topicArn, ":")
-		if len(tokens) != 5 {
-			return nil, fmt.Errorf("expected 5 tokens when splitting topicArn by ':' but only received %d", len(tokens))
+		if len(tokens) != expectedTokenCount {
+			return nil, fmt.Errorf("expected %d tokens when splitting topicArn by ':' but received %d", expectedTokenCount, len(tokens))
 		} else {
 			return &messages.ReferenceMsg{
 				S3Region:       region,

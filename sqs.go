@@ -258,10 +258,12 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 
 // Example queueUrl: https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
 func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attributesHash string) (*messages.ReferenceMsg, error) {
+	const expectedTokenCount = 5
+
 	if queueUrl != nil {
 		tokens := strings.Split(*queueUrl, "/")
-		if len(tokens) != 5 {
-			return nil, fmt.Errorf("expected 5 tokens when splitting queueUrl by '/' but only received %d", len(tokens))
+		if len(tokens) != expectedTokenCount {
+			return nil, fmt.Errorf("expected %d tokens when splitting queueUrl by '/' but received %d", expectedTokenCount, len(tokens))
 		} else {
 			return &messages.ReferenceMsg{
 				S3Region:       region,
