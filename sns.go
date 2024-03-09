@@ -37,7 +37,6 @@ type SnsClientWrapper struct {
 // NewSnsClientWrapper will create a new Hefty SNS client wrapper using an existing AWS SNS client and AWS S3 client.
 // This Hefty SNS client wrapper will save large messages greater than MaxSnsMessageLengthBytes to AWS S3 in the
 // bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
-// TODO: check msg size
 func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName string) (*SnsClientWrapper, error) {
 	// check if bucket exits
 	if ok, err := utils.BucketExists(s3Client, bucketName); !ok {
