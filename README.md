@@ -143,13 +143,13 @@ The Hefty SNS Client Wrapper is similar to the Hefty SQS Client Wrapper and is p
 When creating a subscription to an AWS SNS topic that will be used to publish large messages, it is important to enable the option `Raw Message Delivery`. This allows any message attributes sent with the AWS SNS message to be isolated separately from the message body when the message makes its way to AWS SQS. If this option is not enabled, the message attributes are sent along with the message body, and the Hefty SQS Client Wrapper `ReceiveMessage(...)` method has no way of determining if a message is in fact a large message stored in AWS S3.
 
 #### Additional Endpoints
-The Hefty SNS Client Wrapper has been exclusively tested with having AWS SQS as an endpoint. However, there are potentially additional endpoints that can be used such as AWS Lambda and HTTP/HTTPS endpoints. These endpoints could take the reference message and download the large message from AWS S3 themselves. The following is a JSON representation of the reference message sent.
+The Hefty SNS Client Wrapper has been exclusively tested with having AWS SQS as an endpoint. However, there are potentially additional endpoints that can be used such as AWS Lambda and HTTP/HTTPS endpoints. These endpoints could take the reference message and download the large message from AWS S3 themselves. The following is a JSON representation of an example reference message.
 ```json
 {
-   "s3_region":         "us-west-2",
-   "s3_bucket":         "my-bucket",
-   "s3_key":            "foo/bar",
-   "md5_hash_msg_body": "f6335cfd72eec3e93f84c1d0330c5f85",
-   "md5_hash_msg_attr": "0d3b2bd785f7e1d17bf21d41d2e4939a"
+   "s3_region":           "us-west-2",
+   "s3_bucket":           "my-bucket",
+   "s3_key":              "foo/bar",
+   "md5_digest_msg_body": "f6335cfd72eec3e93f84c1d0330c5f85",
+   "md5_digest_msg_attr": "0d3b2bd785f7e1d17bf21d41d2e4939a"
 }
 ```
