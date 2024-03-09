@@ -20,11 +20,7 @@ import (
 )
 
 const (
-	MaxSqsMessageLengthBytes             = 262_144    // 256KB
-	MaxHeftyMessageLengthBytes           = 33_554_432 // 32MB
-	heftyClientVersionMessageKey         = "hefty-client-version"
-	receiptHandlePrefix                  = "hefty-message"
-	expectedHeftyReceiptHandleTokenCount = 4
+	receiptHandlePrefix = "c976bb5ff9634b1ea7f69fd2390e3fef"
 )
 
 type SqsClientWrapper struct {
@@ -36,7 +32,7 @@ type SqsClientWrapper struct {
 }
 
 // NewSqsClientWrapper will create a new Hefty SQS client wrapper using an existing AWS SQS client and AWS S3 client.
-// This Hefty SQS client wrapper will save large messages greater than MaxSqsMessageLengthBytes to AWS S3 in the
+// This Hefty SQS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
 // bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
 func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClientWrapper, error) {
 	// check if bucket exits
@@ -57,7 +53,7 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 	}, nil
 }
 
-// SendHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsMessageLengthBytes is exceeded.
+// SendHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
 // If so, the message is saved in AWS S3 as a hefty message and a reference message is sent to AWS SQS instead.
 // Note that this function's signature matches that of the AWS SDK's SendMessage function.
 func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
@@ -69,34 +65,38 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 		return client.SendMessage(ctx, params, optFns...)
 	}
 
-	// create hefty message
-	heftyMsg, err := messages.NewHeftySqsMessage(params.MessageBody, params.MessageAttributes)
+	// normalize message attributes
+	msgAttributes := messages.MapFromSqsMessageAttributeValues(params.MessageAttributes)
+
+	// calculate message size
+	msgSize, err := messages.MessageSize(params.MessageBody, msgAttributes)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create hefty message. %v", err)
+		return nil, fmt.Errorf("unable to get size of message. %v", err)
 	}
 
 	// validate message size
-	if heftyMsg.Size <= MaxSqsMessageLengthBytes {
+	if msgSize <= MaxSqsSnsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
-	} else if heftyMsg.Size > MaxHeftyMessageLengthBytes {
-		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", heftyMsg.Size, MaxHeftyMessageLengthBytes)
+	} else if msgSize > MaxHeftyMessageLengthBytes {
+		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
 	}
 
-	// serialize hefty message
+	// create and serialize hefty message
+	heftyMsg := messages.NewHeftyMessage(params.MessageBody, msgAttributes, msgSize)
 	serialized, bodyOffset, msgAttrOffset, err := heftyMsg.Serialize()
 	if err != nil {
 		return nil, fmt.Errorf("unable to serialize message. %v", err)
 	}
 
 	// create md5 digests
-	bodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
+	msgBodyHash := messages.Md5Digest(serialized[bodyOffset:msgAttrOffset])
 	msgAttrHash := ""
 	if len(heftyMsg.MessageAttributes) > 0 {
 		msgAttrHash = messages.Md5Digest(serialized[msgAttrOffset:])
 	}
 
 	// create reference message
-	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, bodyHash, msgAttrHash)
+	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, msgBodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 	}
@@ -118,10 +118,16 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 	params.MessageBody = aws.String(string(jsonRefMsg))
 
-	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
 	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-	params.MessageAttributes[heftyClientVersionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
+
+	// replace overwritten values with original values
+	defer func() {
+		params.MessageBody = heftyMsg.Body
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(heftyMsg.MessageAttributes)
+		params.MessageAttributes = sqsAttributes
+	}()
 
 	out, err := client.SendMessage(ctx, params, optFns...)
 	if err != nil {
@@ -129,7 +135,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// overwrite md5 values
-	out.MD5OfMessageBody = aws.String(bodyHash)
+	out.MD5OfMessageBody = aws.String(msgBodyHash)
 	out.MD5OfMessageAttributes = aws.String(msgAttrHash)
 
 	return out, err
@@ -148,9 +154,9 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	// request hefty message attribute
 	if params.MessageAttributeNames == nil {
-		params.MessageAttributeNames = []string{heftyClientVersionMessageKey}
+		params.MessageAttributeNames = []string{HeftyClientVersionMessageAttributeKey}
 	} else {
-		params.MessageAttributeNames = append(params.MessageAttributeNames, heftyClientVersionMessageKey)
+		params.MessageAttributeNames = append(params.MessageAttributeNames, HeftyClientVersionMessageAttributeKey)
 	}
 
 	out, err := client.ReceiveMessage(ctx, params, optFns...)
@@ -159,7 +165,7 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 	}
 
 	for i := range out.Messages {
-		if _, ok := out.Messages[i].MessageAttributes[heftyClientVersionMessageKey]; !ok {
+		if _, ok := out.Messages[i].MessageAttributes[HeftyClientVersionMessageAttributeKey]; !ok {
 			continue
 		}
 
@@ -181,18 +187,19 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// decode message from s3
-		heftyMsg, err := messages.DeserializeHeftySqsMsg(buf.Bytes())
+		heftyMsg, err := messages.DeserializeHeftyMessage(buf.Bytes())
 		if err != nil {
 			return nil, fmt.Errorf("unable to decode bytes into hefty message type. %v", err)
 		}
 
 		// replace message body and attributes with s3 message
 		out.Messages[i].Body = heftyMsg.Body
-		out.Messages[i].MessageAttributes = heftyMsg.MessageAttributes
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(heftyMsg.MessageAttributes)
+		out.Messages[i].MessageAttributes = sqsAttributes
 
 		// replace md5 hashes
-		out.Messages[i].MD5OfBody = &refMsg.SqsMd5HashBody
-		out.Messages[i].MD5OfMessageAttributes = &refMsg.SqsMd5HashMsgAttr
+		out.Messages[i].MD5OfBody = &refMsg.Md5DigestMsgBody
+		out.Messages[i].MD5OfMessageAttributes = &refMsg.Md5DigestMsgAttr
 
 		// modify receipt handle to contain s3 bucket and key info
 		newReceiptHandle := fmt.Sprintf("%s|%s|%s|%s", receiptHandlePrefix, *out.Messages[i].ReceiptHandle, refMsg.S3Bucket, refMsg.S3Key)
@@ -209,6 +216,8 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 // if a hefty message resides in AWS S3 or not.
 // Note that this function's signature matches that of the AWS SDK's DeleteMessage function.
 func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
+	const expectedHeftyReceiptHandleTokenCount = 4
+
 	if params.ReceiptHandle == nil {
 		return client.DeleteMessage(ctx, params, optFns...)
 	}
@@ -248,18 +257,20 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 }
 
 // Example queueUrl: https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue
-func newSqsReferenceMessage(queueUrl *string, bucketName, region, bodyHash, attributesHash string) (*messages.ReferenceMsg, error) {
+func newSqsReferenceMessage(queueUrl *string, bucketName, region, msgBodyHash, msgAttrHash string) (*messages.ReferenceMsg, error) {
+	const expectedTokenCount = 5
+
 	if queueUrl != nil {
 		tokens := strings.Split(*queueUrl, "/")
-		if len(tokens) != 5 {
-			return nil, fmt.Errorf("expected 5 tokens when splitting queueUrl by '/' but only received %d", len(tokens))
+		if len(tokens) != expectedTokenCount {
+			return nil, fmt.Errorf("expected %d tokens when splitting queueUrl by '/' but received %d", expectedTokenCount, len(tokens))
 		} else {
 			return &messages.ReferenceMsg{
-				S3Region:          region,
-				S3Bucket:          bucketName,
-				S3Key:             fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
-				SqsMd5HashBody:    bodyHash,
-				SqsMd5HashMsgAttr: attributesHash,
+				S3Region:         region,
+				S3Bucket:         bucketName,
+				S3Key:            fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
+				Md5DigestMsgBody: msgBodyHash,
+				Md5DigestMsgAttr: msgAttrHash,
 			}, nil
 		}
 	}

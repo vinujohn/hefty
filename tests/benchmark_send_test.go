@@ -12,8 +12,22 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty"
+	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/testutils"
 )
+
+/*
+March 8, 2024 7:30pm
+go test -bench=BenchmarkSend -benchtime 1m -run BenchmarkSend
+goos: linux
+goarch: amd64
+pkg: github.com/vinujohn/hefty/tests
+cpu: Intel(R) Core(TM) i7-3770K CPU @ 3.50GHz
+BenchmarkSend
+BenchmarkSend-8              498         145469814 ns/op
+PASS
+ok      github.com/vinujohn/hefty/tests 97.631s
+*/
 
 func BenchmarkSend(b *testing.B) {
 	const bucket = "hefty-benchmark-tests"
@@ -30,10 +44,11 @@ func BenchmarkSend(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		body, attr := testutils.GetMsgBodyAndAttrsRandom()
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(attr)
 		in := &sqs.SendMessageInput{
 			QueueUrl:          &queueUrl,
 			MessageBody:       body,
-			MessageAttributes: attr,
+			MessageAttributes: sqsAttributes,
 		}
 		fmt.Printf("body size:%d, num message attributes:%d\n", len(*body), len(attr))
 		b.StartTimer()
