@@ -20,11 +20,7 @@ import (
 )
 
 const (
-	MaxSqsMessageLengthBytes             = 262_144    // 256KB
-	MaxHeftyMessageLengthBytes           = 33_554_432 // 32MB
-	heftyClientVersionMessageKey         = "hefty-client-version"
-	receiptHandlePrefix                  = "hefty-message"
-	expectedHeftyReceiptHandleTokenCount = 4
+	receiptHandlePrefix = "c976bb5ff9634b1ea7f69fd2390e3fef"
 )
 
 type SqsClientWrapper struct {
@@ -36,7 +32,7 @@ type SqsClientWrapper struct {
 }
 
 // NewSqsClientWrapper will create a new Hefty SQS client wrapper using an existing AWS SQS client and AWS S3 client.
-// This Hefty SQS client wrapper will save large messages greater than MaxSqsMessageLengthBytes to AWS S3 in the
+// This Hefty SQS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
 // bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
 func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClientWrapper, error) {
 	// check if bucket exits
@@ -57,7 +53,7 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 	}, nil
 }
 
-// SendHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsMessageLengthBytes is exceeded.
+// SendHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
 // If so, the message is saved in AWS S3 as a hefty message and a reference message is sent to AWS SQS instead.
 // Note that this function's signature matches that of the AWS SDK's SendMessage function.
 func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
@@ -79,7 +75,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// validate message size
-	if msgSize <= MaxSqsMessageLengthBytes {
+	if msgSize <= MaxSqsSnsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
@@ -125,7 +121,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
 	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-	params.MessageAttributes[heftyClientVersionMessageKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 
 	// replace overwritten values with original values
 	defer func() {
@@ -159,9 +155,9 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	// request hefty message attribute
 	if params.MessageAttributeNames == nil {
-		params.MessageAttributeNames = []string{heftyClientVersionMessageKey}
+		params.MessageAttributeNames = []string{HeftyClientVersionMessageAttributeKey}
 	} else {
-		params.MessageAttributeNames = append(params.MessageAttributeNames, heftyClientVersionMessageKey)
+		params.MessageAttributeNames = append(params.MessageAttributeNames, HeftyClientVersionMessageAttributeKey)
 	}
 
 	out, err := client.ReceiveMessage(ctx, params, optFns...)
@@ -170,7 +166,7 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 	}
 
 	for i := range out.Messages {
-		if _, ok := out.Messages[i].MessageAttributes[heftyClientVersionMessageKey]; !ok {
+		if _, ok := out.Messages[i].MessageAttributes[HeftyClientVersionMessageAttributeKey]; !ok {
 			continue
 		}
 
@@ -221,6 +217,8 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 // if a hefty message resides in AWS S3 or not.
 // Note that this function's signature matches that of the AWS SDK's DeleteMessage function.
 func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
+	const expectedHeftyReceiptHandleTokenCount = 4
+
 	if params.ReceiptHandle == nil {
 		return client.DeleteMessage(ctx, params, optFns...)
 	}

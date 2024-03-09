@@ -52,19 +52,19 @@ func GetMsgBodyAndAttrsRandom() (*string, map[string]messages.MessageAttributeVa
 		return rand.Intn(max-min+1) + min
 	}
 
-	return GetMsgBodyAndAttrs(random(minBodySize, hefty.MaxSqsMessageLengthBytes*1.5), random(minNumAttr, maxNumAttr), random(minAttrValueSize, maxAttrValueSize))
+	return GetMsgBodyAndAttrs(random(minBodySize, hefty.MaxSqsSnsMessageLengthBytes*1.5), random(minNumAttr, maxNumAttr), random(minAttrValueSize, maxAttrValueSize))
 }
 
 func GetMaxHeftyMsgBodyAndAttr() (*string, map[string]messages.MessageAttributeValue) {
 	const numAttributes = 11 // more than the sqs limit of 10
 
-	attrTotalSize := (hefty.MaxSqsMessageLengthBytes +
+	attrTotalSize := (hefty.MaxSqsSnsMessageLengthBytes +
 		len("String") + // covers both "String" and "Binary"
 		len("test01")) * numAttributes
 
 	bodySize := hefty.MaxHeftyMessageLengthBytes - attrTotalSize
 
-	return GetMsgBodyAndAttrs(bodySize, numAttributes, hefty.MaxSqsMessageLengthBytes)
+	return GetMsgBodyAndAttrs(bodySize, numAttributes, hefty.MaxSqsSnsMessageLengthBytes)
 }
 
 func GetMaxSqsMsgBodyAndAttr() (*string, map[string]messages.MessageAttributeValue) {
@@ -75,7 +75,7 @@ func GetMaxSqsMsgBodyAndAttr() (*string, map[string]messages.MessageAttributeVal
 		len("String") + // covers both "String" and "Binary"
 		len("test01")) * numAttributes
 
-	bodySize := hefty.MaxSqsMessageLengthBytes - attrTotalSize
+	bodySize := hefty.MaxSqsSnsMessageLengthBytes - attrTotalSize
 
 	return GetMsgBodyAndAttrs(bodySize, numAttributes, attrValueSizeBytes)
 }
@@ -88,7 +88,7 @@ func GetMaxSnsMsgBodyAndAttr() (*string, map[string]messages.MessageAttributeVal
 		len("String") + // covers both "String" and "Binary"
 		len("test01")) * numAttributes
 
-	bodySize := hefty.MaxSqsMessageLengthBytes - attrTotalSize
+	bodySize := hefty.MaxSqsSnsMessageLengthBytes - attrTotalSize
 
 	msgAttr := make(map[string]messages.MessageAttributeValue)
 	msgBody, sqsMsgAttr := GetMsgBodyAndAttrs(bodySize, numAttributes, attrValueSizeBytes)

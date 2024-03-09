@@ -18,14 +18,6 @@ import (
 	"github.com/vinujohn/hefty/internal/utils"
 )
 
-const (
-	MaxSnsMessageLengthBytes = 262_144 // 256KB
-	// 	MaxHeftyMessageLengthBytes           = 33_554_432 // 32MB
-	// 	heftyClientVersionMessageKey         = "hefty-client-version"
-	// 	receiptHandlePrefix                  = "hefty-message"
-	// 	expectedHeftyReceiptHandleTokenCount = 4
-)
-
 type SnsClientWrapper struct {
 	sns.Client
 	bucket     string
@@ -35,7 +27,7 @@ type SnsClientWrapper struct {
 }
 
 // NewSnsClientWrapper will create a new Hefty SNS client wrapper using an existing AWS SNS client and AWS S3 client.
-// This Hefty SNS client wrapper will save large messages greater than MaxSnsMessageLengthBytes to AWS S3 in the
+// This Hefty SNS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
 // bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
 func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName string) (*SnsClientWrapper, error) {
 	// check if bucket exits
@@ -56,7 +48,7 @@ func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName 
 	}, nil
 }
 
-// PublishHeftyMessage will calculate the messages size from `params` and determine if the MaxSnsMessageLengthBytes is exceeded.
+// PublishHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
 // If so, the message is saved in AWS S3 as a hefty message and a reference message is sent to AWS SNS instead.
 // Note that this function's signature matches that of the AWS SDK's SendMessage function.
 func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params *sns.PublishInput, optFns ...func(*sns.Options)) (*sns.PublishOutput, error) {
@@ -78,7 +70,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// validate message size
-	if msgSize <= MaxSnsMessageLengthBytes {
+	if msgSize <= MaxSqsSnsMessageLengthBytes {
 		return client.Publish(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
@@ -125,7 +117,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	//TODO: get correct library version
 	// overwrite message attributes (if any) with hefty message attributes
 	params.MessageAttributes = make(map[string]snsTypes.MessageAttributeValue)
-	params.MessageAttributes[heftyClientVersionMessageKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
+	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String("v0.1")}
 
 	// replace overwritten values with original values
 	defer func() {
