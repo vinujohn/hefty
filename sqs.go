@@ -33,7 +33,8 @@ type SqsClientWrapper struct {
 
 // NewSqsClientWrapper will create a new Hefty SQS client wrapper using an existing AWS SQS client and AWS S3 client.
 // This Hefty SQS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
-// bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
+// bucket that is specified via `bucketName`. The S3 client should have the ability of reading and writing to this bucket.
+// This function will also check if the bucket exists and is accessible.
 func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClientWrapper, error) {
 	// check if bucket exits
 	if ok, err := utils.BucketExists(s3Client, bucketName); !ok {
@@ -55,7 +56,12 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 
 // SendHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
 // If so, the message is saved in AWS S3 as a hefty message and a reference message is sent to AWS SQS instead.
-// Note that this function's signature matches that of the AWS SDK's SendMessage function.
+// If not, the message is directly sent to AWS SNS.
+//
+// In the case of the reference message being sent, the message itself contains metadata about the hefty message saved in AWS S3
+// including bucket name, S3 key, region, and md5 digests.
+//
+// Note that this function's signature matches that of the AWS SQS SDK's SendMessage function.
 func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
 	// input validation; if invalid input let AWS SDK handle it
 	if params == nil ||
@@ -129,6 +135,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 		params.MessageAttributes = sqsAttributes
 	}()
 
+	// send reference message to sqs
 	out, err := client.SendMessage(ctx, params, optFns...)
 	if err != nil {
 		return out, err
@@ -150,17 +157,22 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 // This method will then download the hefty message and then place its body and message attributes in the returned
 // ReceiveMessageOutput. No modification of messages are made when the message has gone through AWS SQS. It is
 // important to use this function when `SendHeftyMessage` is used so that hefty messages can be downloaded from S3.
-// Note that this function's signature matches that of the AWS SDK's ReceiveMessage function.
+//
+// Note that this function's signature matches that of the AWS SQS SDK's ReceiveMessage function.
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
 	// request hefty message attribute
+	originalMsgAttributes := params.MessageAttributeNames
 	if params.MessageAttributeNames == nil {
 		params.MessageAttributeNames = []string{HeftyClientVersionMessageAttributeKey}
 	} else {
 		params.MessageAttributeNames = append(params.MessageAttributeNames, HeftyClientVersionMessageAttributeKey)
 	}
+	defer func() {
+		params.MessageAttributeNames = originalMsgAttributes
+	}()
 
 	out, err := client.ReceiveMessage(ctx, params, optFns...)
-	if err != nil || len(out.Messages) == 0 {
+	if err != nil || out == nil {
 		return out, err
 	}
 
@@ -210,11 +222,11 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 	return out, nil
 }
 
-// DeleteHeftyMessage will delete a hefty message from AWS S3 and also the reference
-// message from AWS SQS. It is important to use the `ReceiptHandle` from
-// `ReceiveHeftyMessage` in this function as this is the only way to determine
+// DeleteHeftyMessage will delete a hefty message from AWS S3 and also the reference message from AWS SQS.
+// It is important to use the `ReceiptHandle` from `ReceiveHeftyMessage` in this function as this is the only way to determine
 // if a hefty message resides in AWS S3 or not.
-// Note that this function's signature matches that of the AWS SDK's DeleteMessage function.
+//
+// Note that this function's signature matches that of the AWS SQS SDK's DeleteMessage function.
 func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
 	const expectedHeftyReceiptHandleTokenCount = 4
 

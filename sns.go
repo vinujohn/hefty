@@ -28,7 +28,8 @@ type SnsClientWrapper struct {
 
 // NewSnsClientWrapper will create a new Hefty SNS client wrapper using an existing AWS SNS client and AWS S3 client.
 // This Hefty SNS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
-// bucket that is specified via `bucketName`. This function will also check if the bucket exists and is accessible.
+// bucket that is specified via `bucketName`. The S3 client should have the ability of reading and writing to this bucket.
+// This function will also check if the bucket exists and is accessible.
 func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName string) (*SnsClientWrapper, error) {
 	// check if bucket exits
 	if ok, err := utils.BucketExists(s3Client, bucketName); !ok {
@@ -50,7 +51,15 @@ func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName 
 
 // PublishHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
 // If so, the message is saved in AWS S3 as a hefty message and a reference message is sent to AWS SNS instead.
-// Note that this function's signature matches that of the AWS SDK's SendMessage function.
+// If not, the message is directly sent to AWS SNS.
+//
+// In the case of the reference message being sent, the message itself contains metadata about the hefty message saved in AWS S3
+// including bucket name, S3 key, region, and md5 digests. Subscriptions to the AWS SNS topic used in this method should use
+// 'Raw Message Delivery' as an option. This ensures that the hefty client can receive messages from these AWS SQS endpoints.
+// Other endpoints like AWS Lambda can use the reference message directly and download the S3 message directly without using the
+// hefty client.
+//
+// Note that this function's signature matches that of the AWS SNS SDK's Publish method.
 func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params *sns.PublishInput, optFns ...func(*sns.Options)) (*sns.PublishOutput, error) {
 	// input validation; if invalid input let AWS SDK handle it
 	if params == nil ||
