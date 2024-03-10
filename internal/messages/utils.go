@@ -9,9 +9,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
+const (
+	ErrUnexpectedDataType = "encountered unexpected data type for message attribute: %s"
+)
+
 func MessageSize(msg *string, msgAttr map[string]MessageAttributeValue) (int, error) {
 	var size int
-	size += len(*msg)
+	if msg != nil {
+		size += len(*msg)
+	}
 
 	for k, v := range msgAttr {
 		dataType := aws.ToString(v.DataType)
@@ -22,7 +28,7 @@ func MessageSize(msg *string, msgAttr map[string]MessageAttributeValue) (int, er
 		} else if strings.HasPrefix(dataType, "Binary") {
 			size += len(v.BinaryValue)
 		} else {
-			return -1, fmt.Errorf("encountered unexpected data type for message attribute: %s", dataType)
+			return -1, fmt.Errorf(ErrUnexpectedDataType, dataType)
 		}
 	}
 
