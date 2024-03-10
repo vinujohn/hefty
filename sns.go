@@ -56,7 +56,7 @@ func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName 
 // In the case of the reference message being sent, the message itself contains metadata about the hefty message saved in AWS S3
 // including bucket name, S3 key, region, and md5 digests. Subscriptions to the AWS SNS topic used in this method should use
 // 'Raw Message Delivery' as an option. This ensures that the hefty client can receive messages from these AWS SQS endpoints.
-// Other endpoints like AWS Lambda can use the reference message directly and download the S3 message directly without using the
+// Other endpoints like AWS Lambda can use the reference message directly and download the S3 message without using the
 // hefty client.
 //
 // Note that this function's signature matches that of the AWS SNS SDK's Publish method.
