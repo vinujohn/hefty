@@ -16,6 +16,8 @@ import (
 	"github.com/vinujohn/hefty/internal/testutils"
 )
 
+const bucket = "hefty-benchmark-tests"
+
 /*
 March 8, 2024 7:30pm
 go test -bench=BenchmarkSend -benchtime 1m -run BenchmarkSend
@@ -30,7 +32,6 @@ ok      github.com/vinujohn/hefty/tests 97.631s
 */
 
 func BenchmarkSend(b *testing.B) {
-	const bucket = "hefty-benchmark-tests"
 
 	heftyClient, s3Client, queueUrl := setup(bucket)
 
@@ -53,6 +54,40 @@ func BenchmarkSend(b *testing.B) {
 		fmt.Printf("body size:%d, num message attributes:%d\n", len(*body), len(attr))
 		b.StartTimer()
 		_, err = heftyClient.SendHeftyMessage(context.TODO(), in)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func BenchmarkReceive(b *testing.B) {
+	heftyClient, s3Client, queueUrl := setup(bucket)
+	b.Cleanup(func() {
+		cleanup(heftyClient, s3Client, queueUrl, bucket)
+	})
+
+	var err error
+	for i := 0; i < b.N; i++ {
+		body, attr := testutils.GetMsgBodyAndAttrsRandom()
+		sqsAttributes := messages.MapToSqsMessageAttributeValues(attr)
+		in := &sqs.SendMessageInput{
+			QueueUrl:          &queueUrl,
+			MessageBody:       body,
+			MessageAttributes: sqsAttributes,
+		}
+		_, err = heftyClient.SendHeftyMessage(context.TODO(), in)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := heftyClient.ReceiveHeftyMessage(context.TODO(), &sqs.ReceiveMessageInput{
+			WaitTimeSeconds: 20,
+			QueueUrl:        &queueUrl,
+		})
 		if err != nil {
 			panic(err)
 		}
