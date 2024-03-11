@@ -230,7 +230,10 @@ var _ = Describe("Hefty Client Wrapper", func() {
 
 			It("and since 2 attributes were requested, we receive 2 of them", func() {
 				Expect(res.Messages[0].MessageAttributes).Should(HaveLen(2))
-				Expect(res.Messages[0].MessageAttributes).Should(HaveKey(MatchRegexp("test0[3|5]$")))
+				Expect(res.Messages[0].MessageAttributes).Should(Or(
+					HaveKey("test03"),
+					HaveKey(("test05")),
+				))
 			})
 		})
 	})
@@ -390,7 +393,10 @@ var _ = Describe("Hefty Client Wrapper", func() {
 
 			It("and since 2 attributes were requested, we receive 2 of them", func() {
 				Expect(res.Messages[0].MessageAttributes).Should(HaveLen(2))
-				Expect(res.Messages[0].MessageAttributes).Should(HaveKey(MatchRegexp("test0[3|5]$")))
+				Expect(res.Messages[0].MessageAttributes).Should(Or(
+					HaveKey("test03"),
+					HaveKey(("test05")),
+				))
 			})
 		})
 	})
