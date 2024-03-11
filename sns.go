@@ -123,14 +123,14 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	params.Message = aws.String(string(jsonRefMsg))
 
 	// overwrite message attributes (if any) with hefty message attributes
+	orgMsgAttr := params.MessageAttributes
 	params.MessageAttributes = make(map[string]snsTypes.MessageAttributeValue)
 	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
 
 	// replace overwritten values with original values
 	defer func() {
 		params.Message = heftyMsg.Body
-		snsMsgAttr := messages.MapToSnsMessageAttributeValues(heftyMsg.MessageAttributes)
-		params.MessageAttributes = snsMsgAttr
+		params.MessageAttributes = orgMsgAttr
 	}()
 
 	out, err := client.Publish(ctx, params, optFns...)
