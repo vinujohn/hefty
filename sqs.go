@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	receiptHandlePrefix = "c976bb5ff9634b1ea7f69fd2390e3fef"
+	receiptHandlePrefix = "c976bb5ff9634b1ea7f69fd2390e3fef" // text used to differentiate a receipt handle belonging to a hefty message
 )
 
 type SqsClientWrapper struct {
