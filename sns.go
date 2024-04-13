@@ -11,7 +11,6 @@ import (
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
-	snsTypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/utils"
@@ -121,10 +120,9 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 	params.Message = aws.String(string(jsonRefMsg))
 
-	// overwrite message attributes (if any) with hefty message attributes
+	// clear out all message attributes
 	orgMsgAttr := params.MessageAttributes
-	params.MessageAttributes = make(map[string]snsTypes.MessageAttributeValue)
-	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
+	params.MessageAttributes = nil
 
 	// replace overwritten values with original values
 	defer func() {

@@ -12,7 +12,6 @@ import (
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/utils"
@@ -123,10 +122,9 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 	params.MessageBody = aws.String(string(jsonRefMsg))
 
-	// overwrite message attributes (if any) with hefty message attributes
+	// clear out all message attributes
 	origMsgAttr := params.MessageAttributes
-	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
+	params.MessageAttributes = nil
 
 	// replace overwritten values with original values
 	defer func() {
@@ -159,24 +157,13 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 //
 // Note that this function's signature matches that of the AWS SQS SDK's ReceiveMessage function.
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
-	// request hefty message attribute
-	originalMsgAttributes := params.MessageAttributeNames
-	if params.MessageAttributeNames == nil {
-		params.MessageAttributeNames = []string{HeftyClientVersionMessageAttributeKey}
-	} else {
-		params.MessageAttributeNames = append(params.MessageAttributeNames, HeftyClientVersionMessageAttributeKey)
-	}
-	defer func() {
-		params.MessageAttributeNames = originalMsgAttributes
-	}()
-
 	out, err := client.ReceiveMessage(ctx, params, optFns...)
 	if err != nil || out == nil {
 		return out, err
 	}
 
 	for i := range out.Messages {
-		if _, ok := out.Messages[i].MessageAttributes[HeftyClientVersionMessageAttributeKey]; !ok {
+		if !messages.IsReferenceMsg(*out.Messages[i].Body) {
 			continue
 		}
 
@@ -275,13 +262,13 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, region, msgBodyHash, m
 		if len(tokens) != expectedTokenCount {
 			return nil, fmt.Errorf("expected %d tokens when splitting queueUrl by '/' but received %d", expectedTokenCount, len(tokens))
 		} else {
-			return &messages.ReferenceMsg{
-				S3Region:         region,
-				S3Bucket:         bucketName,
-				S3Key:            fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
-				Md5DigestMsgBody: msgBodyHash,
-				Md5DigestMsgAttr: msgAttrHash,
-			}, nil
+
+			return messages.NewReferenceMsg(
+				region,
+				bucketName,
+				fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
+				msgBodyHash,
+				msgAttrHash), nil
 		}
 	}
 
