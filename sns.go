@@ -79,7 +79,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// validate message size
-	if msgSize <= MaxSqsSnsMessageLengthBytes {
+	if msgSize <= MaxAwsMessageLengthBytes {
 		return client.Publish(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)

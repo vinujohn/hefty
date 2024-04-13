@@ -81,7 +81,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// validate message size
-	if msgSize <= MaxSqsSnsMessageLengthBytes {
+	if msgSize <= MaxAwsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
