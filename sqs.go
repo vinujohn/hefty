@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -118,7 +117,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// replace incoming message body with reference message
-	jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
+	jsonRefMsg, err := refMsg.ToJson()
 	if err != nil {
 		return nil, fmt.Errorf("unable to marshal json message. %v", err)
 	}
@@ -182,15 +181,14 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		}
 
 		// deserialize message body
-		var refMsg messages.ReferenceMsg
-		err = json.Unmarshal([]byte(*out.Messages[i].Body), &refMsg)
+		refMsg, err := messages.ToReferenceMsg(*out.Messages[i].Body)
 		if err != nil {
 			return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
 		}
 
 		// make call to s3 to get message
 		buf := s3manager.NewWriteAtBuffer([]byte{})
-		_, err := client.downloader.Download(ctx, buf, &s3.GetObjectInput{
+		_, err = client.downloader.Download(ctx, buf, &s3.GetObjectInput{
 			Bucket: &refMsg.S3Bucket,
 			Key:    &refMsg.S3Key,
 		})

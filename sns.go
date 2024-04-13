@@ -3,7 +3,6 @@ package hefty
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -116,9 +115,9 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// replace incoming message body with reference message
-	jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
+	jsonRefMsg, err := refMsg.ToJson()
 	if err != nil {
-		return nil, fmt.Errorf("unable to marshal json message. %v", err)
+		return nil, fmt.Errorf("unable to marshal message to json. %v", err)
 	}
 	params.Message = aws.String(string(jsonRefMsg))
 
@@ -150,13 +149,12 @@ func newSnsReferenceMessage(topicArn *string, bucketName, region, msgBodyHash, m
 		if len(tokens) != expectedTokenCount {
 			return nil, fmt.Errorf("expected %d tokens when splitting topicArn by ':' but received %d", expectedTokenCount, len(tokens))
 		} else {
-			return &messages.ReferenceMsg{
-				S3Region:         region,
-				S3Bucket:         bucketName,
-				S3Key:            fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: topicArn/uuid
-				Md5DigestMsgBody: msgBodyHash,
-				Md5DigestMsgAttr: msgAttrHash,
-			}, nil
+			return messages.NewReferenceMsg(
+				region,
+				bucketName,
+				fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: topicArn/uuid,
+				msgBodyHash,
+				msgAttrHash), nil
 		}
 	}
 
