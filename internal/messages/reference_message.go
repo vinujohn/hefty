@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const referenceMsgIdentifierKey = "d3131a62e0224688b77a506fd333dac4" // used to identify a reference message
+const referenceMsgIdentifierKey = "d3131a62e0224688b77a506fd333dac4"
 
 var jsonReferenceMsgPrefix string
 
@@ -16,7 +16,7 @@ func init() {
 
 // ReferenceMsg is what is sent to AWS SQS or AWS SNS in place of hefty message stored in AWS S3.
 type ReferenceMsg struct {
-	Identifier       string `json:"identifier"`
+	Identifier       string `json:"identifier"` // used to identify a reference message from other types of messages
 	S3Region         string `json:"s3_region"`
 	S3Bucket         string `json:"s3_bucket"`
 	S3Key            string `json:"s3_key"`
