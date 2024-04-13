@@ -3,7 +3,6 @@ package hefty
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
-	snsTypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/utils"
@@ -79,7 +77,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// validate message size
-	if msgSize <= MaxSqsSnsMessageLengthBytes {
+	if msgSize <= MaxAwsMessageLengthBytes {
 		return client.Publish(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
@@ -116,16 +114,15 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// replace incoming message body with reference message
-	jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
+	jsonRefMsg, err := refMsg.ToJson()
 	if err != nil {
-		return nil, fmt.Errorf("unable to marshal json message. %v", err)
+		return nil, fmt.Errorf("unable to marshal message to json. %v", err)
 	}
 	params.Message = aws.String(string(jsonRefMsg))
 
-	// overwrite message attributes (if any) with hefty message attributes
+	// clear out all message attributes
 	orgMsgAttr := params.MessageAttributes
-	params.MessageAttributes = make(map[string]snsTypes.MessageAttributeValue)
-	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = snsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
+	params.MessageAttributes = nil
 
 	// replace overwritten values with original values
 	defer func() {
@@ -150,13 +147,12 @@ func newSnsReferenceMessage(topicArn *string, bucketName, region, msgBodyHash, m
 		if len(tokens) != expectedTokenCount {
 			return nil, fmt.Errorf("expected %d tokens when splitting topicArn by ':' but received %d", expectedTokenCount, len(tokens))
 		} else {
-			return &messages.ReferenceMsg{
-				S3Region:         region,
-				S3Bucket:         bucketName,
-				S3Key:            fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: topicArn/uuid
-				Md5DigestMsgBody: msgBodyHash,
-				Md5DigestMsgAttr: msgAttrHash,
-			}, nil
+			return messages.NewReferenceMsg(
+				region,
+				bucketName,
+				fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: topicArn/uuid,
+				msgBodyHash,
+				msgAttrHash), nil
 		}
 	}
 

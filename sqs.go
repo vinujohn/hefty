@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/utils"
@@ -81,7 +79,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// validate message size
-	if msgSize <= MaxSqsSnsMessageLengthBytes {
+	if msgSize <= MaxAwsMessageLengthBytes {
 		return client.SendMessage(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
@@ -118,16 +116,15 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// replace incoming message body with reference message
-	jsonRefMsg, err := json.MarshalIndent(refMsg, "", "\t")
+	jsonRefMsg, err := refMsg.ToJson()
 	if err != nil {
 		return nil, fmt.Errorf("unable to marshal json message. %v", err)
 	}
 	params.MessageBody = aws.String(string(jsonRefMsg))
 
-	// overwrite message attributes (if any) with hefty message attributes
+	// clear out all message attributes
 	origMsgAttr := params.MessageAttributes
-	params.MessageAttributes = make(map[string]sqsTypes.MessageAttributeValue)
-	params.MessageAttributes[HeftyClientVersionMessageAttributeKey] = sqsTypes.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(HeftyClientVersion)}
+	params.MessageAttributes = nil
 
 	// replace overwritten values with original values
 	defer func() {
@@ -160,37 +157,25 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 //
 // Note that this function's signature matches that of the AWS SQS SDK's ReceiveMessage function.
 func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
-	// request hefty message attribute
-	originalMsgAttributes := params.MessageAttributeNames
-	if params.MessageAttributeNames == nil {
-		params.MessageAttributeNames = []string{HeftyClientVersionMessageAttributeKey}
-	} else {
-		params.MessageAttributeNames = append(params.MessageAttributeNames, HeftyClientVersionMessageAttributeKey)
-	}
-	defer func() {
-		params.MessageAttributeNames = originalMsgAttributes
-	}()
-
 	out, err := client.ReceiveMessage(ctx, params, optFns...)
 	if err != nil || out == nil {
 		return out, err
 	}
 
 	for i := range out.Messages {
-		if _, ok := out.Messages[i].MessageAttributes[HeftyClientVersionMessageAttributeKey]; !ok {
+		if !messages.IsReferenceMsg(*out.Messages[i].Body) {
 			continue
 		}
 
 		// deserialize message body
-		var refMsg messages.ReferenceMsg
-		err = json.Unmarshal([]byte(*out.Messages[i].Body), &refMsg)
+		refMsg, err := messages.ToReferenceMsg(*out.Messages[i].Body)
 		if err != nil {
 			return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
 		}
 
 		// make call to s3 to get message
 		buf := s3manager.NewWriteAtBuffer([]byte{})
-		_, err := client.downloader.Download(ctx, buf, &s3.GetObjectInput{
+		_, err = client.downloader.Download(ctx, buf, &s3.GetObjectInput{
 			Bucket: &refMsg.S3Bucket,
 			Key:    &refMsg.S3Key,
 		})
@@ -277,13 +262,13 @@ func newSqsReferenceMessage(queueUrl *string, bucketName, region, msgBodyHash, m
 		if len(tokens) != expectedTokenCount {
 			return nil, fmt.Errorf("expected %d tokens when splitting queueUrl by '/' but received %d", expectedTokenCount, len(tokens))
 		} else {
-			return &messages.ReferenceMsg{
-				S3Region:         region,
-				S3Bucket:         bucketName,
-				S3Key:            fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
-				Md5DigestMsgBody: msgBodyHash,
-				Md5DigestMsgAttr: msgAttrHash,
-			}, nil
+
+			return messages.NewReferenceMsg(
+				region,
+				bucketName,
+				fmt.Sprintf("%s/%s", tokens[4], uuid.New().String()), // S3Key: queueName/uuid
+				msgBodyHash,
+				msgAttrHash), nil
 		}
 	}
 
