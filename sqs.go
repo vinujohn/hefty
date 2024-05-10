@@ -61,9 +61,7 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 			return nil, err
 		}
 	}
-	if wrapperOptions.alwaysSendToS3 != nil {
-		wrapper.alwaysSendToS3 = *wrapperOptions.alwaysSendToS3
-	}
+	wrapper.alwaysSendToS3 = wrapperOptions.alwaysSendToS3
 
 	return wrapper, nil
 }
