@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/utils"
@@ -184,7 +186,8 @@ func (wrapper *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params
 		// deserialize message body
 		refMsg, err := messages.ToReferenceMsg(*out.Messages[i].Body)
 		if err != nil {
-			return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
+			addErrorToSqsMessage(&out.Messages[i], nil, fmt.Errorf("unable to unmarshal reference message. %v", err))
+			continue
 		}
 
 		// make call to s3 to get message
@@ -194,13 +197,15 @@ func (wrapper *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params
 			Key:    &refMsg.S3Key,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("unable to get message from s3. %v", err)
+			addErrorToSqsMessage(&out.Messages[i], refMsg, fmt.Errorf("unable to get message from s3. %v", err))
+			continue
 		}
 
 		// decode message from s3
 		heftyMsg, err := messages.DeserializeHeftyMessage(buf.Bytes())
 		if err != nil {
-			return nil, fmt.Errorf("unable to decode bytes into hefty message type. %v", err)
+			addErrorToSqsMessage(&out.Messages[i], refMsg, fmt.Errorf("unable to decode bytes from s3 into hefty message type. %v", err))
+			continue
 		}
 
 		// replace message body and attributes with s3 message
@@ -219,6 +224,24 @@ func (wrapper *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params
 	}
 
 	return out, nil
+}
+
+func addErrorToSqsMessage(msg *types.Message, refMsg *messages.ReferenceMsg, err error) {
+	type errMsg struct {
+		Error        string                 `json:"error"`
+		ReferenceMsg *messages.ReferenceMsg `json:"reference_msg"`
+	}
+
+	e := &errMsg{
+		Error:        err.Error(),
+		ReferenceMsg: refMsg,
+	}
+
+	jErr, _ := json.MarshalIndent(e, "", "\t")
+
+	msg.Body = aws.String(string(jErr))
+	msg.MD5OfBody = nil
+	msg.MD5OfMessageAttributes = nil
 }
 
 // DeleteHeftyMessage will delete a hefty message from AWS S3 and also the reference message from AWS SQS.
