@@ -227,19 +227,11 @@ func (wrapper *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params
 }
 
 func addErrorToSqsMessage(msg *types.Message, refMsg *messages.ReferenceMsg, err error) {
-	type errMsg struct {
-		Error        string                 `json:"error"`
-		ReferenceMsg *messages.ReferenceMsg `json:"reference_msg"`
-	}
+	errMsg := messages.NewErrorMsg(err, refMsg)
 
-	e := &errMsg{
-		Error:        err.Error(),
-		ReferenceMsg: refMsg,
-	}
+	jsonErrMsg, _ := json.MarshalIndent(errMsg, "", "\t")
 
-	jErr, _ := json.MarshalIndent(e, "", "\t")
-
-	msg.Body = aws.String(string(jErr))
+	msg.Body = aws.String(string(jsonErrMsg))
 	msg.MD5OfBody = nil
 	msg.MD5OfMessageAttributes = nil
 }

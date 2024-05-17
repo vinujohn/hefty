@@ -18,3 +18,19 @@ func ReferenceMsg(msgBody string) (*messages.ReferenceMsg, bool) {
 
 	return ret, true
 }
+
+// ErrorMsg determines if a message body is an error message and returns a struct holding the error and the reference message.
+// If a message is indeed an error, the error signifies a problem getting either the hefty message from AWS S3 or an error
+// deserializing the reference message.
+func ErrorMsg(msgBody string) (*messages.ErrorMsg, bool) {
+	if !messages.IsErrorMsg(msgBody) {
+		return nil, false
+	}
+
+	ret, err := messages.ToErrorMsg(msgBody)
+	if err != nil {
+		return nil, false
+	}
+
+	return ret, true
+}
