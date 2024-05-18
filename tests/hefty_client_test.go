@@ -186,13 +186,25 @@ var _ = Describe("Hefty Client Wrapper", func() {
 	}
 
 	When("When sending a message to AWS SQS with the Hefty client wrapper", func() {
-		Context("and the message is at, but not over the Hefty message size limit", Ordered, func() {
-			var queueUrl *string
-			var msg *string
-			var input *sqs.SendMessageInput
-			var sqsMsgAttr map[string]sqsTypes.MessageAttributeValue
-			var res *sqs.ReceiveMessageOutput
+		var queueUrl *string
+		var msg *string
+		var input *sqs.SendMessageInput
+		var sqsMsgAttr map[string]sqsTypes.MessageAttributeValue
+		var requestedAttr []string
+		var res *sqs.ReceiveMessageOutput
 
+		JustBeforeEach(OncePerOrdered, func() {
+			// send message to queue
+			input = SendSqsMessage(*queueUrl, *msg, sqsMsgAttr)
+
+			// receive message from queue
+			res = ReceiveSqsMessage(*queueUrl, requestedAttr)
+
+			// delete message from queue
+			DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+		})
+
+		Context("and the message is at, but not over the Hefty message size limit", Ordered, func() {
 			BeforeAll(func() {
 				// create queue
 				queueUrl = CreateSqsQueue()
@@ -201,17 +213,7 @@ var _ = Describe("Hefty Client Wrapper", func() {
 				var msgAttr map[string]messages.MessageAttributeValue
 				msg, msgAttr = testutils.GetMaxHeftyMsgBodyAndAttr()
 				sqsMsgAttr = messages.MapToSqsMessageAttributeValues(msgAttr)
-				requestedAttr := []string{"test03", "test05"}
-
-				// send message to queue
-				input = SendSqsMessage(*queueUrl, *msg, sqsMsgAttr)
-
-				// receive message from queue
-				res = ReceiveSqsMessage(*queueUrl, requestedAttr)
-			})
-
-			AfterAll(func() {
-				DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+				requestedAttr = []string{"test03", "test05"}
 			})
 
 			It("and the message body and message attributes sent is not overwritten", func() {
@@ -229,12 +231,6 @@ var _ = Describe("Hefty Client Wrapper", func() {
 		})
 
 		Context("and the message is at but not over the AWS SQS size limit", Ordered, func() {
-			var queueUrl *string
-			var msg *string
-			var input *sqs.SendMessageInput
-			var sqsMsgAttr map[string]sqsTypes.MessageAttributeValue
-			var res *sqs.ReceiveMessageOutput
-
 			BeforeAll(func() {
 				// create queue
 				queueUrl = CreateSqsQueue()
@@ -243,17 +239,7 @@ var _ = Describe("Hefty Client Wrapper", func() {
 				var msgAttr map[string]messages.MessageAttributeValue
 				msg, msgAttr = testutils.GetMaxSqsMsgBodyAndAttr()
 				sqsMsgAttr = messages.MapToSqsMessageAttributeValues(msgAttr)
-				requestedAttr := []string{"test03", "test05"}
-
-				// send message to queue
-				input = SendSqsMessage(*queueUrl, *msg, sqsMsgAttr)
-
-				// receive message from queue
-				res = ReceiveSqsMessage(*queueUrl, requestedAttr)
-			})
-
-			AfterAll(func() {
-				DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+				requestedAttr = []string{"test03", "test05"}
 			})
 
 			It("and the message body and message attributes sent is not overwritten", func() {
@@ -272,10 +258,39 @@ var _ = Describe("Hefty Client Wrapper", func() {
 					HaveKey(("test05")),
 				))
 			})
+
+			Context("but the AlwaysSendToS3 option was set on the wrapper", Ordered, func() {
+				BeforeAll(func() {
+					// override client wrapper
+					heftySqsClient, _ = hefty.NewSqsClientWrapper(sqsClient, s3Client, testBucket, hefty.AlwaysSendToS3())
+
+					// send message to queue
+					input = SendSqsMessage(*queueUrl, *msg, sqsMsgAttr)
+
+					// receive message from queue
+					res = ReceiveSqsMessage(*queueUrl, requestedAttr)
+
+					// delete message from queue
+					DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+				})
+
+				It("and even though 2 attributes were requested, we receive all of them", func() {
+					Expect(res.Messages[0].MessageAttributes).To(Equal(sqsMsgAttr))
+				})
+			})
 		})
 	})
 
 	When("When sending a message to AWS SNS with the Hefty client", func() {
+		var msg *string
+		var queueUrl *string
+		var topicArn *string
+		var snsMsgAttr map[string]snsTypes.MessageAttributeValue
+		var sqsMsgAttr map[string]sqsTypes.MessageAttributeValue
+		var requestedAttr []string
+		var input *sns.PublishInput
+		var res *sqs.ReceiveMessageOutput
+
 		CreateSnsTopicAndSubscription := func(queueUrl *string) *string {
 			GinkgoHelper()
 			// create topic
@@ -351,37 +366,31 @@ var _ = Describe("Hefty Client Wrapper", func() {
 			return input
 		}
 
-		Context("and the message is at, but not over the Hefty message size limit", Ordered, func() {
-			var msg *string
-			var queueUrl *string
-			var snsMsgAttr map[string]snsTypes.MessageAttributeValue
-			var sqsMsgAttr map[string]sqsTypes.MessageAttributeValue
-			var input *sns.PublishInput
-			var res *sqs.ReceiveMessageOutput
+		JustBeforeEach(OncePerOrdered, func() {
+			// publish message to topic
+			input = PublishSnsMessage(topicArn, msg, snsMsgAttr)
 
+			// receive message from queue
+			res = ReceiveSqsMessage(*queueUrl, requestedAttr)
+
+			// delete message from queue
+			DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+		})
+
+		Context("and the message is at, but not over the Hefty message size limit", Ordered, func() {
 			BeforeAll(func() {
 				// create queue
 				queueUrl = CreateSqsQueue()
+
 				// create topic and subscription
-				topicArn := CreateSnsTopicAndSubscription(queueUrl)
+				topicArn = CreateSnsTopicAndSubscription(queueUrl)
 
 				// create message body and attributes
 				var msgAttr map[string]messages.MessageAttributeValue
 				msg, msgAttr = testutils.GetMaxHeftyMsgBodyAndAttr()
 				snsMsgAttr = messages.MapToSnsMessageAttributeValues(msgAttr)
 				sqsMsgAttr = messages.MapToSqsMessageAttributeValues(msgAttr)
-				requestedAttr := []string{"test03", "test05"}
-
-				// publish message to topic
-				input = PublishSnsMessage(topicArn, msg, snsMsgAttr)
-
-				// receive message from queue
-				res = ReceiveSqsMessage(*queueUrl, requestedAttr)
-
-			})
-
-			AfterAll(func() {
-				DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+				requestedAttr = []string{"test03", "test05"}
 			})
 
 			It("and the message body and message attributes sent is not overwritten", func() {
@@ -399,33 +408,18 @@ var _ = Describe("Hefty Client Wrapper", func() {
 		})
 
 		Context("and the message is at but not over the AWS SNS size limit", Ordered, func() {
-			var msg *string
-			var queueUrl *string
-			var snsMsgAttr map[string]snsTypes.MessageAttributeValue
-			var input *sns.PublishInput
-			var res *sqs.ReceiveMessageOutput
-
 			BeforeAll(func() {
 				// create queue
 				queueUrl = CreateSqsQueue()
 				// create topic and subscription
-				topicArn := CreateSnsTopicAndSubscription(queueUrl)
+				topicArn = CreateSnsTopicAndSubscription(queueUrl)
 
 				// create message body and attributes
 				var msgAttr map[string]messages.MessageAttributeValue
 				msg, msgAttr = testutils.GetMaxSnsMsgBodyAndAttr()
 				snsMsgAttr = messages.MapToSnsMessageAttributeValues(msgAttr)
-				requestedAttr := []string{"test03", "test05"}
-
-				// publish message to topic
-				input = PublishSnsMessage(topicArn, msg, snsMsgAttr)
-
-				// receive message from queue
-				res = ReceiveSqsMessage(*queueUrl, requestedAttr)
-			})
-
-			AfterAll(func() {
-				DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+				sqsMsgAttr = messages.MapToSqsMessageAttributeValues(msgAttr)
+				requestedAttr = []string{"test03", "test05"}
 			})
 
 			It("and the message body and message attributes sent is not overwritten", func() {
@@ -443,6 +437,26 @@ var _ = Describe("Hefty Client Wrapper", func() {
 					HaveKey("test03"),
 					HaveKey(("test05")),
 				))
+			})
+		})
+
+		Context("but the AlwaysSendToS3 option was set on the wrapper", Ordered, func() {
+			BeforeAll(func() {
+				// override client wrapper
+				heftySnsClient, _ = hefty.NewSnsClientWrapper(snsClient, s3Client, testBucket, hefty.AlwaysSendToS3())
+
+				// publish message to topic
+				input = PublishSnsMessage(topicArn, msg, snsMsgAttr)
+
+				// receive message from queue
+				res = ReceiveSqsMessage(*queueUrl, requestedAttr)
+
+				// delete message from queue
+				DeleteHeftyMessage(*queueUrl, *res.Messages[0].ReceiptHandle)
+			})
+
+			It("and even though 2 attributes were requested, we receive all of them", func() {
+				Expect(res.Messages[0].MessageAttributes).To(Equal(sqsMsgAttr))
 			})
 		})
 	})
