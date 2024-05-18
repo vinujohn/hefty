@@ -130,6 +130,9 @@ It is important to be consistent when sending messages via the Hefty SQS Client 
 #### Undeliverable Messages
 There will always be cases with asynchronous messaging where messages cannot be processed and are undeliverable. It is important to use the capabilities that AWS SQS provides in these cases, such as dead letter queues, redrive policies, and message expiration. With the Hefty SQS Client Wrapper, the problem is compounded since there is a data store with these potentially undeliverable messages. If these stored messages are of a sensitive nature or are expensive to store, it is important to make sure they are secured properly with the right encryption and have the appropriate object lifecycles assigned to them.
 
+#### Errors During ReceiveHeftyMessage Operation
+During the `ReceiveHeftyMessage(...)` operation, errors can occur with some or all messages which need to be downloaded from AWS S3. Rather then return an error for the entire operation for one message, the error is placed in the message body for the message that had the error. The utility function `ErrorMsg(...)` can be used to see if a message received is in fact an error. 
+
 ## Hefty SNS Client Wrapper
 The Hefty SNS Client Wrapper is similar to the Hefty SQS Client Wrapper and is provided to send large messages to AWS SNS so that they can be consumed by various endpoints. This includes AWS SQS, where there is an established pattern of sending a message to AWS SNS, which is in turn consumed by one or more AWS SQS queues. The same exact considerations listed for the Hefty SQS Client Wrapper apply to the Hefty SNS Client Wrapper as well, with some important additions listed later.
 
@@ -153,3 +156,8 @@ The Hefty SNS Client Wrapper has been exclusively tested with having AWS SQS as 
    "md5_digest_msg_attr": "0d3b2bd785f7e1d17bf21d41d2e4939a"
 }
 ```
+## Options
+The following table lists options that can be provided to the client wrappers and their behavior.
+| Option           | Valid for Wrapper | Behavior |
+|------------------|-------------------|----------|
+| AlwaysSendToS3() | SQS/SNS           | If set, the wrapper will always send a message to S3 regardless of size |
