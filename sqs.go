@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/google/uuid"
 	"github.com/vinujohn/hefty/internal/messages"
 	"github.com/vinujohn/hefty/internal/utils"
@@ -23,17 +25,18 @@ const (
 
 type SqsClientWrapper struct {
 	sqs.Client
-	bucket     string
-	s3Client   *s3.Client
-	uploader   *s3manager.Uploader
-	downloader *s3manager.Downloader
+	bucket         string
+	s3Client       *s3.Client
+	uploader       *s3manager.Uploader
+	downloader     *s3manager.Downloader
+	alwaysSendToS3 bool
 }
 
 // NewSqsClientWrapper will create a new Hefty SQS client wrapper using an existing AWS SQS client and AWS S3 client.
 // This Hefty SQS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
 // bucket that is specified via `bucketName`. The S3 client should have the ability of reading and writing to this bucket.
 // This function will also check if the bucket exists and is accessible.
-func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string) (*SqsClientWrapper, error) {
+func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName string, opts ...Option) (*SqsClientWrapper, error) {
 	// check if bucket exits
 	if ok, err := utils.BucketExists(s3Client, bucketName); !ok {
 		if err != nil {
@@ -43,13 +46,26 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 		return nil, fmt.Errorf("bucket %s does not exist or is not accessible", bucketName)
 	}
 
-	return &SqsClientWrapper{
+	// create new wrapper
+	wrapper := &SqsClientWrapper{
 		Client:     *sqsClient,
 		bucket:     bucketName,
 		s3Client:   s3Client,
 		uploader:   s3manager.NewUploader(s3Client),
 		downloader: s3manager.NewDownloader(s3Client),
-	}, nil
+	}
+
+	// process available options
+	var wrapperOptions options
+	for _, opt := range opts {
+		err := opt(&wrapperOptions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	wrapper.alwaysSendToS3 = wrapperOptions.alwaysSendToS3
+
+	return wrapper, nil
 }
 
 // SendHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
@@ -60,13 +76,13 @@ func NewSqsClientWrapper(sqsClient *sqs.Client, s3Client *s3.Client, bucketName 
 // including bucket name, S3 key, region, and md5 digests.
 //
 // Note that this function's signature matches that of the AWS SQS SDK's SendMessage function.
-func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
+func (wrapper *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error) {
 	// input validation; if invalid input let AWS SDK handle it
 	if params == nil ||
 		params.MessageBody == nil ||
 		len(*params.MessageBody) == 0 {
 
-		return client.SendMessage(ctx, params, optFns...)
+		return wrapper.SendMessage(ctx, params, optFns...)
 	}
 
 	// normalize message attributes
@@ -79,8 +95,8 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// validate message size
-	if msgSize <= MaxAwsMessageLengthBytes {
-		return client.SendMessage(ctx, params, optFns...)
+	if !wrapper.alwaysSendToS3 && msgSize <= MaxAwsMessageLengthBytes {
+		return wrapper.SendMessage(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
 	}
@@ -100,14 +116,14 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}
 
 	// create reference message
-	refMsg, err := newSqsReferenceMessage(params.QueueUrl, client.bucket, client.Options().Region, msgBodyHash, msgAttrHash)
+	refMsg, err := newSqsReferenceMessage(params.QueueUrl, wrapper.bucket, wrapper.Options().Region, msgBodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from queueUrl. %v", err)
 	}
 
 	// upload hefty message to s3
-	_, err = client.uploader.Upload(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(client.bucket),
+	_, err = wrapper.uploader.Upload(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(wrapper.bucket),
 		Key:    aws.String(refMsg.S3Key),
 		Body:   bytes.NewReader(serialized),
 	})
@@ -133,7 +149,7 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 	}()
 
 	// send reference message to sqs
-	out, err := client.SendMessage(ctx, params, optFns...)
+	out, err := wrapper.SendMessage(ctx, params, optFns...)
 	if err != nil {
 		return out, err
 	}
@@ -146,8 +162,8 @@ func (client *SqsClientWrapper) SendHeftyMessage(ctx context.Context, params *sq
 }
 
 // SendHeftyMessageBatch is currently not supported and will use the underlying AWS SQS SDK's method `SendMessageBatch`
-func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, params *sqs.SendMessageBatchInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageBatchOutput, error) {
-	return client.SendMessageBatch(ctx, params, optFns...)
+func (wrapper *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, params *sqs.SendMessageBatchInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageBatchOutput, error) {
+	return wrapper.SendMessageBatch(ctx, params, optFns...)
 }
 
 // ReceiveHeftyMessage will determine if a message received is a reference to a hefty message residing in AWS S3.
@@ -156,8 +172,8 @@ func (client *SqsClientWrapper) SendHeftyMessageBatch(ctx context.Context, param
 // important to use this function when `SendHeftyMessage` is used so that hefty messages can be downloaded from S3.
 //
 // Note that this function's signature matches that of the AWS SQS SDK's ReceiveMessage function.
-func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
-	out, err := client.ReceiveMessage(ctx, params, optFns...)
+func (wrapper *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	out, err := wrapper.ReceiveMessage(ctx, params, optFns...)
 	if err != nil || out == nil {
 		return out, err
 	}
@@ -170,23 +186,26 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 		// deserialize message body
 		refMsg, err := messages.ToReferenceMsg(*out.Messages[i].Body)
 		if err != nil {
-			return nil, fmt.Errorf("unable to unmarshal reference message. %v", err)
+			addErrorToSqsMessage(&out.Messages[i], nil, fmt.Errorf("unable to unmarshal reference message. %v", err))
+			continue
 		}
 
 		// make call to s3 to get message
 		buf := s3manager.NewWriteAtBuffer([]byte{})
-		_, err = client.downloader.Download(ctx, buf, &s3.GetObjectInput{
+		_, err = wrapper.downloader.Download(ctx, buf, &s3.GetObjectInput{
 			Bucket: &refMsg.S3Bucket,
 			Key:    &refMsg.S3Key,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("unable to get message from s3. %v", err)
+			addErrorToSqsMessage(&out.Messages[i], refMsg, fmt.Errorf("unable to get message from s3. %v", err))
+			continue
 		}
 
 		// decode message from s3
 		heftyMsg, err := messages.DeserializeHeftyMessage(buf.Bytes())
 		if err != nil {
-			return nil, fmt.Errorf("unable to decode bytes into hefty message type. %v", err)
+			addErrorToSqsMessage(&out.Messages[i], refMsg, fmt.Errorf("unable to decode bytes from s3 into hefty message type. %v", err))
+			continue
 		}
 
 		// replace message body and attributes with s3 message
@@ -207,16 +226,26 @@ func (client *SqsClientWrapper) ReceiveHeftyMessage(ctx context.Context, params 
 	return out, nil
 }
 
+func addErrorToSqsMessage(msg *types.Message, refMsg *messages.ReferenceMsg, err error) {
+	errMsg := messages.NewErrorMsg(err, refMsg)
+
+	jsonErrMsg, _ := json.MarshalIndent(errMsg, "", "\t")
+
+	msg.Body = aws.String(string(jsonErrMsg))
+	msg.MD5OfBody = nil
+	msg.MD5OfMessageAttributes = nil
+}
+
 // DeleteHeftyMessage will delete a hefty message from AWS S3 and also the reference message from AWS SQS.
 // It is important to use the `ReceiptHandle` from `ReceiveHeftyMessage` in this function as this is the only way to determine
 // if a hefty message resides in AWS S3 or not.
 //
 // Note that this function's signature matches that of the AWS SQS SDK's DeleteMessage function.
-func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
+func (wrapper *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
 	const expectedHeftyReceiptHandleTokenCount = 4
 
 	if params.ReceiptHandle == nil {
-		return client.DeleteMessage(ctx, params, optFns...)
+		return wrapper.DeleteMessage(ctx, params, optFns...)
 	}
 
 	// decode receipt handle
@@ -228,7 +257,7 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 
 	// check if decoded receipt handle is for a hefty message
 	if !strings.HasPrefix(decodedStr, receiptHandlePrefix) {
-		return client.DeleteMessage(ctx, params, optFns...)
+		return wrapper.DeleteMessage(ctx, params, optFns...)
 	}
 
 	// get tokens from receipt handle
@@ -239,7 +268,7 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 
 	// delete hefty message from s3
 	receiptHandle, s3Bucket, s3Key := tokens[1], tokens[2], tokens[3]
-	_, err = client.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+	_, err = wrapper.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &s3Bucket,
 		Key:    &s3Key,
 	})
@@ -250,7 +279,7 @@ func (client *SqsClientWrapper) DeleteHeftyMessage(ctx context.Context, params *
 	// replace receipt handle with real one to delete sqs message
 	params.ReceiptHandle = &receiptHandle
 
-	return client.DeleteMessage(ctx, params, optFns...)
+	return wrapper.DeleteMessage(ctx, params, optFns...)
 }
 
 // Example queueUrl: https://sqs.us-west-2.amazonaws.com/765908583888/MyTestQueue

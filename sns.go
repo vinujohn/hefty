@@ -18,17 +18,18 @@ import (
 
 type SnsClientWrapper struct {
 	sns.Client
-	bucket     string
-	s3Client   *s3.Client
-	uploader   *s3manager.Uploader
-	downloader *s3manager.Downloader
+	bucket         string
+	s3Client       *s3.Client
+	uploader       *s3manager.Uploader
+	downloader     *s3manager.Downloader
+	alwaysSendToS3 bool
 }
 
 // NewSnsClientWrapper will create a new Hefty SNS client wrapper using an existing AWS SNS client and AWS S3 client.
 // This Hefty SNS client wrapper will save large messages greater than MaxSqsSnsMessageLengthBytes to AWS S3 in the
 // bucket that is specified via `bucketName`. The S3 client should have the ability of reading and writing to this bucket.
 // This function will also check if the bucket exists and is accessible.
-func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName string) (*SnsClientWrapper, error) {
+func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName string, opts ...Option) (*SnsClientWrapper, error) {
 	// check if bucket exits
 	if ok, err := utils.BucketExists(s3Client, bucketName); !ok {
 		if err != nil {
@@ -38,13 +39,25 @@ func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName 
 		return nil, fmt.Errorf("bucket %s does not exist or is not accessible", bucketName)
 	}
 
-	return &SnsClientWrapper{
+	wrapper := &SnsClientWrapper{
 		Client:     *snsClient,
 		bucket:     bucketName,
 		s3Client:   s3Client,
 		uploader:   s3manager.NewUploader(s3Client),
 		downloader: s3manager.NewDownloader(s3Client),
-	}, nil
+	}
+
+	// process available options
+	var wrapperOptions options
+	for _, opt := range opts {
+		err := opt(&wrapperOptions)
+		if err != nil {
+			return nil, err
+		}
+	}
+	wrapper.alwaysSendToS3 = wrapperOptions.alwaysSendToS3
+
+	return wrapper, nil
 }
 
 // PublishHeftyMessage will calculate the messages size from `params` and determine if the MaxSqsSnsMessageLengthBytes is exceeded.
@@ -58,13 +71,13 @@ func NewSnsClientWrapper(snsClient *sns.Client, s3Client *s3.Client, bucketName 
 // hefty client.
 //
 // Note that this function's signature matches that of the AWS SNS SDK's Publish method.
-func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params *sns.PublishInput, optFns ...func(*sns.Options)) (*sns.PublishOutput, error) {
+func (wrapper *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params *sns.PublishInput, optFns ...func(*sns.Options)) (*sns.PublishOutput, error) {
 	// input validation; if invalid input let AWS SDK handle it
 	if params == nil ||
 		params.Message == nil ||
 		len(*params.Message) == 0 {
 
-		return client.Publish(ctx, params, optFns...)
+		return wrapper.Publish(ctx, params, optFns...)
 	}
 
 	// normalize message attributes
@@ -77,8 +90,8 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// validate message size
-	if msgSize <= MaxAwsMessageLengthBytes {
-		return client.Publish(ctx, params, optFns...)
+	if !wrapper.alwaysSendToS3 && msgSize <= MaxAwsMessageLengthBytes {
+		return wrapper.Publish(ctx, params, optFns...)
 	} else if msgSize > MaxHeftyMessageLengthBytes {
 		return nil, fmt.Errorf("message size of %d bytes greater than allowed message size of %d bytes", msgSize, MaxHeftyMessageLengthBytes)
 	}
@@ -98,14 +111,14 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 	}
 
 	// create reference message
-	refMsg, err := newSnsReferenceMessage(params.TopicArn, client.bucket, client.Options().Region, msgBodyHash, msgAttrHash)
+	refMsg, err := newSnsReferenceMessage(params.TopicArn, wrapper.bucket, wrapper.Options().Region, msgBodyHash, msgAttrHash)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create reference message from topicArn. %v", err)
 	}
 
 	// upload hefty message to s3
-	_, err = client.uploader.Upload(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(client.bucket),
+	_, err = wrapper.uploader.Upload(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(wrapper.bucket),
 		Key:    aws.String(refMsg.S3Key),
 		Body:   bytes.NewReader(serialized),
 	})
@@ -130,7 +143,7 @@ func (client *SnsClientWrapper) PublishHeftyMessage(ctx context.Context, params 
 		params.MessageAttributes = orgMsgAttr
 	}()
 
-	out, err := client.Publish(ctx, params, optFns...)
+	out, err := wrapper.Publish(ctx, params, optFns...)
 	if err != nil {
 		return out, err
 	}
