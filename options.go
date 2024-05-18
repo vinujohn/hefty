@@ -6,7 +6,6 @@ type options struct {
 
 type Option func(opts *options) error
 
-// TODO: Need to add tests for this option
 // If selected, the message payload will always be sent to AWS S3 regardless of its size
 func AlwaysSendToS3() Option {
 	return func(opts *options) error {
